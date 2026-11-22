@@ -60,6 +60,8 @@ services:
       - LITELLM_MODEL=${LITELLM_MODEL:-gemma-4-31b-it}
       - LITELLM_EMBEDDING_MODEL=${LITELLM_EMBEDDING_MODEL:-embeded}
       - ALLOWED_ORIGINS=*
+    extra_hosts:
+      - "llm.addpay.in.th:host-gateway"
     expose:
       - "8000"
 
