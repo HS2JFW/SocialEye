@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, date
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import get_db
+from app.db.session import get_db, AsyncSessionLocal
 from app.db.models import Content, Evaluation, DailyIndex, Alert
 from app.analyzer.aggregator import DIMENSIONS
 from app.ingest.rss import run_ingestion_pipeline
@@ -116,7 +116,6 @@ async def get_provinces_ranking(session: AsyncSession = Depends(get_db)):
     
     for row in result.all():
         prov, total, s_suf, s_dis, s_int, s_pub, s_gra = row
-        # Convert -2..+2 averages to 0..5
         def to5(v):
             return round(((v + 2.0) / 4.0) * 5.0, 2) if v is not None else 2.50
 
@@ -215,8 +214,15 @@ async def get_alerts(limit: int = 20, session: AsyncSession = Depends(get_db)):
     rows = (await session.execute(q)).scalars().all()
     return {"alerts": rows}
 
+async def _bg_run_ingest():
+    try:
+        async with AsyncSessionLocal() as session:
+            await run_ingestion_pipeline(session, max_items_per_feed=2)
+    except Exception as e:
+        print(f"Background ingest error: {e}")
+
 @router.post("/ingest/trigger")
-async def trigger_manual_ingest(session: AsyncSession = Depends(get_db)):
-    """Manually triggers an ingestion and AI evaluation cycle."""
-    result = await run_ingestion_pipeline(session, max_items_per_feed=3)
-    return {"status": "success", "summary": result}
+async def trigger_manual_ingest(background_tasks: BackgroundTasks):
+    """Manually triggers an ingestion and AI evaluation cycle in the background."""
+    background_tasks.add_task(_bg_run_ingest)
+    return {"status": "success", "message": "เริ่มกระบวนการดึงและวิเคราะห์ข่าวในพื้นหลังแล้ว ระบบจะอัปเดตข้อมูลอัตโนมัติ"}
