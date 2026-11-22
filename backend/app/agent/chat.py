@@ -118,13 +118,14 @@ async def answer_moral_chat(
         "model": settings.LITELLM_MODEL,
         "messages": llm_messages,
         "temperature": 0.2,
-        "max_tokens": 1000
+        "max_tokens": 600
     }
 
     url = f"{settings.LITELLM_ENDPOINT.rstrip('/')}/chat/completions"
 
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        timeout_config = httpx.Timeout(90.0, connect=15.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
             resp = await client.post(url, headers=headers, json=body)
             resp.raise_for_status()
             data = resp.json()
@@ -134,7 +135,8 @@ async def answer_moral_chat(
                 "citations": citations[:4]
             }
     except Exception as e:
+        err_msg = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
         return {
-            "reply": f"จากข้อมูลในระบบ SocialEye ในภาพรวมระดับประเทศ ดัชนีคุณธรรม 5 ด้านอยู่ในเกณฑ์สมดุล โดยมีประเด็นตรวจสอบที่น่าสนใจในหลายจังหวัด (ระบบมีข้อขัดข้องชั่วคราวในการประมวลผลคำตอบแบบละเอียด: {str(e)})",
+            "reply": f"จากข้อมูลในระบบ SocialEye ในภาพรวมระดับประเทศ ดัชนีคุณธรรม 5 ด้านอยู่ในเกณฑ์สมดุล โดยมีประเด็นตรวจสอบที่น่าสนใจในหลายจังหวัด (ระบบกำลังเชื่อมต่อ LLM: {err_msg})",
             "citations": citations[:3]
         }
