@@ -20,9 +20,16 @@ AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
 
+from sqlalchemy import text
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate schema dynamically if new columns were added to existing tables
+        try:
+            await conn.execute(text("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS original_ai_scores JSON;"))
+        except Exception as e:
+            print(f"[SocialEye] Migration notice: {e}")
 
 async def get_db():
     async with AsyncSessionLocal() as session:
