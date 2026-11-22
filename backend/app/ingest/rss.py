@@ -7,6 +7,7 @@ from app.db.models import Content, Evaluation
 from app.analyzer.scoring import evaluate_content_with_llm
 from app.analyzer.aggregator import calculate_daily_indices
 from app.analyzer.alerts import check_for_alerts
+from app.rag.graph import graph_manager
 
 RSS_FEEDS = [
     {"source": "Thai PBS", "url": "https://www.thaipbs.or.th/rss/news/general"},
@@ -86,6 +87,20 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                 )
                 session.add(eval_obj)
                 evaluated_count += 1
+
+                # Sync to Knowledge Graph (Neo4j)
+                try:
+                    await graph_manager.sync_evaluation_to_graph(
+                        content_id=content_obj.id,
+                        title=title,
+                        text=text_content,
+                        province=eval_obj.province,
+                        scores=orig_scores,
+                        evidence_quote=eval_obj.evidence_quote,
+                        rationale=eval_obj.rationale
+                    )
+                except Exception as ge:
+                    print(f"[Ingest] Graph sync notice: {ge}")
 
             await session.commit()
         except Exception as e:

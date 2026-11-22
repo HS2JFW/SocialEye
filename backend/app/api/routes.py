@@ -10,6 +10,10 @@ from app.ingest.rss import run_ingestion_pipeline
 from app.analyzer.benchmark import compute_benchmark_metrics
 from app.data.seed_data import seed_golden_dataset
 from app.analyzer.few_shot import get_embedding
+from app.analyzer.clustering import get_issue_clusters
+from app.agent.chat import answer_moral_chat
+from app.analyzer.map_data import get_thailand_map_overview
+from app.rag.graph import graph_manager
 
 router = APIRouter()
 
@@ -420,6 +424,35 @@ async def get_alerts(limit: int = 20, session: AsyncSession = Depends(get_db)):
     q = select(Alert).order_by(desc(Alert.triggered_at)).limit(limit)
     rows = (await session.execute(q)).scalars().all()
     return {"alerts": rows}
+
+# --- Phase 3: Intelligence & Knowledge Graph Endpoints ---
+
+@router.post("/chat")
+async def chat_moral_assistant(payload: dict, session: AsyncSession = Depends(get_db)):
+    """Conversational Moral Intelligence Chat Agent powered by Gemma-4 and RAG."""
+    messages = payload.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="Messages list is required")
+    res = await answer_moral_chat(messages, session)
+    return res
+
+@router.get("/topics/clusters")
+async def get_clusters_endpoint(session: AsyncSession = Depends(get_db)):
+    """Returns dynamic moral issue clusters with narrative summaries and momentum."""
+    clusters = await get_issue_clusters(session)
+    return {"clusters": clusters}
+
+@router.get("/map/provinces")
+async def get_map_provinces_endpoint(session: AsyncSession = Depends(get_db)):
+    """Returns regional and 77-province aggregated moral index data for interactive choropleth map."""
+    map_data = await get_thailand_map_overview(session)
+    return map_data
+
+@router.get("/graph/overview")
+async def get_graph_overview_endpoint():
+    """Returns Knowledge Graph (Neo4j / In-Memory) entity relationship overview."""
+    overview = await graph_manager.get_graph_overview()
+    return overview
 
 async def _bg_run_ingest():
     try:

@@ -7,6 +7,7 @@ from app.db.session import init_db, AsyncSessionLocal
 from app.api.routes import router as api_router
 from app.ingest.scheduler import start_scheduler, stop_scheduler
 from app.data.seed_data import seed_golden_dataset
+from app.rag.graph import graph_manager
 
 async def _bg_seed():
     try:
@@ -14,6 +15,10 @@ async def _bg_seed():
             await seed_golden_dataset(session)
     except Exception as e:
         print(f"[SocialEye] Seed dataset notice: {e}")
+    try:
+        await graph_manager.init_schema()
+    except Exception as e:
+        print(f"[SocialEye] Graph schema notice: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,9 +34,13 @@ async def lifespan(app: FastAPI):
         print(f"[SocialEye] Scheduler notice: {e}")
     yield
     # Shutdown
-    print("[SocialEye] Shutting down scheduler...")
+    print("[SocialEye] Shutting down...")
     try:
         stop_scheduler()
+    except Exception as e:
+        pass
+    try:
+        await graph_manager.close()
     except Exception as e:
         pass
 

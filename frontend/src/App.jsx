@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ShieldCheck, HeartHandshake, Scale, Users, Sparkles, 
   TrendingUp, TrendingDown, Minus, RefreshCw, AlertTriangle, 
   MapPin, CheckCircle, ExternalLink, Edit3, X, Eye, Info,
   Bell, Activity, Calendar, Search, Filter, ChevronRight,
-  Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, Trash2, ArrowUpRight
+  Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
+  Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame
 } from 'lucide-react';
 
 const DIMENSIONS = [
@@ -24,9 +25,9 @@ const DIMENSION_ICONS = {
 };
 
 export default function App() {
-  // Navigation
-  const [activeMainTab, setActiveMainTab] = useState('dashboard'); // 'dashboard' | 'quality'
-  const [activeQualitySubtab, setActiveQualitySubtab] = useState('benchmark'); // 'benchmark' | 'queue' | 'golden'
+  // Navigation Tabs: 'dashboard' | 'map' | 'clusters' | 'chat' | 'quality'
+  const [activeMainTab, setActiveMainTab] = useState('dashboard');
+  const [activeQualitySubtab, setActiveQualitySubtab] = useState('benchmark');
 
   // Dashboard Data
   const [overview, setOverview] = useState([]);
@@ -44,13 +45,32 @@ export default function App() {
     gratitude: true
   });
   
-  // Quality & Human-in-the-Loop Data
+  // Phase 2: Quality & Human-in-the-Loop Data
   const [benchmark, setBenchmark] = useState(null);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [goldenSamples, setGoldenSamples] = useState([]);
-  const [queueFilter, setQueueFilter] = useState('unreviewed'); // 'unreviewed' | 'reviewed' | 'all'
+  const [queueFilter, setQueueFilter] = useState('unreviewed');
   const [goldenCategoryFilter, setGoldenCategoryFilter] = useState('all');
   const [goldenSearch, setGoldenSearch] = useState('');
+
+  // Phase 3: Intelligence Data (Map, Clusters, Chat, Graph)
+  const [mapData, setMapData] = useState({ regions: {}, provinces: [] });
+  const [selectedRegion, setSelectedRegion] = useState('ทั้งหมด');
+  const [selectedProvinceModal, setSelectedProvinceModal] = useState(null);
+  const [clusters, setClusters] = useState([]);
+  const [graphOverview, setGraphOverview] = useState(null);
+
+  // Chat Agent States
+  const [chatMessages, setChatMessages] = useState([
+    {
+      role: 'assistant',
+      content: 'สวัสดีครับ ผมคือ SocialEye Moral Intelligence Assistant ผู้ช่วย AI วิเคราะห์ดัชนีคุณธรรม 5 ด้านของประเทศไทย สามารถสอบถามข้อมูลดัชนีคุณธรรม, แนวโน้มรายสัปดาห์, สถานการณ์รายจังหวัด หรือประเด็นตรวจสอบทุจริตและจิตอาสาได้เลยครับ',
+      citations: []
+    }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatBottomRef = useRef(null);
 
   // UI States
   const [loading, setLoading] = useState(true);
@@ -67,7 +87,10 @@ export default function App() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [resOverview, resFeed, resProvinces, resAlerts, resTimeseries, resBench, resQueue, resGolden] = await Promise.all([
+      const [
+        resOverview, resFeed, resProvinces, resAlerts, resTimeseries, 
+        resBench, resQueue, resGolden, resMap, resClusters, resGraph
+      ] = await Promise.all([
         fetch('/api/indices/overview').then(r => r.json()).catch(() => ({ overview: [] })),
         fetch('/api/feed?limit=30').then(r => r.json()).catch(() => ({ feed: [] })),
         fetch('/api/indices/provinces').then(r => r.json()).catch(() => ({ provinces: [] })),
@@ -75,7 +98,10 @@ export default function App() {
         fetch('/api/indices/timeseries?days=14').then(r => r.json()).catch(() => ({ timeseries: [] })),
         fetch('/api/quality/benchmark').then(r => r.json()).catch(() => null),
         fetch('/api/quality/queue?limit=25&status=unreviewed').then(r => r.json()).catch(() => ({ items: [] })),
-        fetch('/api/quality/golden-samples?limit=50').then(r => r.json()).catch(() => ({ samples: [] }))
+        fetch('/api/quality/golden-samples?limit=50').then(r => r.json()).catch(() => ({ samples: [] })),
+        fetch('/api/map/provinces').then(r => r.json()).catch(() => ({ regions: {}, provinces: [] })),
+        fetch('/api/topics/clusters').then(r => r.json()).catch(() => ({ clusters: [] })),
+        fetch('/api/graph/overview').then(r => r.json()).catch(() => null)
       ]);
 
       setOverview(resOverview.overview || []);
@@ -85,6 +111,9 @@ export default function App() {
       setBenchmark(resBench);
       setReviewQueue(resQueue.items || []);
       setGoldenSamples(resGolden.samples || []);
+      setMapData(resMap || { regions: {}, provinces: [] });
+      setClusters(resClusters.clusters || []);
+      setGraphOverview(resGraph);
       
       // Timeseries smoothing
       let ts = resTimeseries.timeseries || [];
@@ -131,6 +160,49 @@ export default function App() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (activeMainTab === 'chat' && chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeMainTab]);
+
+  const handleSendChat = async (e) => {
+    if (e) e.preventDefault();
+    if (!chatInput.trim() || chatLoading) return;
+
+    const userMsg = { role: 'user', content: chatInput.trim() };
+    const newMessages = [...chatMessages, userMsg];
+    setChatMessages(newMessages);
+    setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newMessages })
+      });
+      const data = await res.json();
+      setChatMessages([...newMessages, {
+        role: 'assistant',
+        content: data.reply || 'ขออภัย ระบบไม่สามารถประมวลผลคำตอบได้ในขณะนี้',
+        citations: data.citations || []
+      }]);
+    } catch (err) {
+      setChatMessages([...newMessages, {
+        role: 'assistant',
+        content: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI Chat Agent โปรดลองอีกครั้ง',
+        citations: []
+      }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handlePromptClick = (promptText) => {
+    setChatInput(promptText);
+  };
 
   const triggerIngest = async () => {
     setIngesting(true);
@@ -243,6 +315,14 @@ export default function App() {
     return provinces.filter(p => p.province.toLowerCase().includes(provinceSearch.toLowerCase()));
   }, [provinces, provinceSearch]);
 
+  const filteredMapProvinces = useMemo(() => {
+    let list = mapData.provinces || [];
+    if (selectedRegion !== 'ทั้งหมด') {
+      list = list.filter(p => p.region === selectedRegion);
+    }
+    return list;
+  }, [mapData, selectedRegion]);
+
   const filteredGolden = useMemo(() => {
     return goldenSamples.filter(s => {
       const matchCat = goldenCategoryFilter === 'all' || s.category === goldenCategoryFilter;
@@ -264,6 +344,14 @@ export default function App() {
   const getY = (val) => padT + innerH - ((val / 5.0) * innerH);
   const getX = (idx, total) => padL + (idx / Math.max(1, total - 1)) * innerW;
 
+  const getScoreColorBadge = (score) => {
+    if (score >= 3.5) return 'bg-emerald-100 text-emerald-800 border-emerald-300';
+    if (score >= 2.6) return 'bg-blue-100 text-blue-800 border-blue-300';
+    if (score >= 2.4) return 'bg-slate-100 text-slate-800 border-slate-300';
+    if (score >= 2.0) return 'bg-amber-100 text-amber-800 border-amber-300';
+    return 'bg-rose-100 text-rose-800 border-rose-300';
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-16">
       
@@ -277,8 +365,8 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-black tracking-tight text-slate-900">SocialEye</h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase tracking-wider">
-                  Phase 2 • Quality & AI
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 uppercase tracking-wider">
+                  Phase 3 • Intelligence & Map
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden sm:block">
@@ -289,31 +377,65 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {/* Main Tabs Navigation */}
-            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-xl">
               <button
                 onClick={() => setActiveMainTab('dashboard')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
                   activeMainTab === 'dashboard'
                     ? 'bg-white text-blue-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Activity className="w-4 h-4" />
+                <Activity className="w-3.5 h-3.5" />
                 <span>แดชบอร์ดดัชนี</span>
               </button>
+
               <button
-                onClick={() => setActiveMainTab('quality')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  activeMainTab === 'quality'
+                onClick={() => setActiveMainTab('map')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  activeMainTab === 'map'
+                    ? 'bg-white text-rose-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Map className="w-3.5 h-3.5" />
+                <span>แผนที่ 77 จังหวัด</span>
+              </button>
+
+              <button
+                onClick={() => setActiveMainTab('clusters')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  activeMainTab === 'clusters'
+                    ? 'bg-white text-amber-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5" />
+                <span>ประเด็นร้อน</span>
+              </button>
+
+              <button
+                onClick={() => setActiveMainTab('chat')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  activeMainTab === 'chat'
                     ? 'bg-white text-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Award className="w-4 h-4" />
-                <span>ศูนย์วัดคุณภาพ & ติดป้าย</span>
-                {benchmark?.overall?.gate_passed && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                )}
+                <Bot className="w-3.5 h-3.5" />
+                <span>AI Chat</span>
+              </button>
+
+              <button
+                onClick={() => setActiveMainTab('quality')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  activeMainTab === 'quality'
+                    ? 'bg-white text-emerald-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>ศูนย์วัดคุณภาพ</span>
               </button>
             </div>
 
@@ -333,7 +455,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Ingestion & Seed Status Notice Banner */}
+      {/* Notice Banners */}
       {ingestStatusMsg && (
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 text-xs text-blue-800 flex items-center justify-center gap-2 transition animate-fade-in">
           <Activity className="w-4 h-4 animate-spin text-blue-600" />
@@ -474,7 +596,6 @@ export default function App() {
                       </p>
                     </div>
 
-                    {/* Dimension Toggles */}
                     <div className="flex flex-wrap gap-1.5">
                       {DIMENSIONS.map(dim => (
                         <button
@@ -495,7 +616,6 @@ export default function App() {
                   {/* SVG Multi-line Graph */}
                   <div className="mt-4 relative overflow-x-auto">
                     <svg viewBox={`0 0 ${chartW} ${chartH}`} className="w-full h-64 select-none">
-                      {/* Grid Lines */}
                       {[0, 1.25, 2.50, 3.75, 5.00].map((v) => {
                         const y = getY(v);
                         return (
@@ -521,7 +641,6 @@ export default function App() {
                         );
                       })}
 
-                      {/* Neutral Baseline Label */}
                       <text
                         x={chartW - padR - 5}
                         y={getY(2.50) - 5}
@@ -531,7 +650,6 @@ export default function App() {
                         Neutral Baseline (2.50)
                       </text>
 
-                      {/* Data Lines */}
                       {timeseries.length > 1 && DIMENSIONS.map((dim) => {
                         if (!activeLines[dim.key]) return null;
 
@@ -550,7 +668,6 @@ export default function App() {
                               strokeLinejoin="round"
                               points={points}
                             />
-                            {/* Interactive Data Dots */}
                             {timeseries.map((d, i) => {
                               const val = d[dim.key] !== undefined ? d[dim.key] : 2.5;
                               const cx = getX(i, timeseries.length);
@@ -574,7 +691,6 @@ export default function App() {
                         );
                       })}
 
-                      {/* X-axis date labels */}
                       {timeseries.map((d, i) => {
                         if (timeseries.length > 8 && i % 2 !== 0 && i !== timeseries.length - 1) return null;
                         const x = getX(i, timeseries.length);
@@ -592,7 +708,6 @@ export default function App() {
                       })}
                     </svg>
 
-                    {/* Tooltip on Hover */}
                     {hoveredPoint && (
                       <div 
                         className="absolute pointer-events-none bg-slate-900 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg shadow-lg -translate-x-1/2 -translate-y-full mb-2 z-10"
@@ -742,7 +857,6 @@ export default function App() {
                     </p>
                   </div>
 
-                  {/* Filter chips */}
                   <div className="flex flex-wrap gap-1">
                     <button
                       onClick={() => setActiveDimFilter('all')}
@@ -826,14 +940,12 @@ export default function App() {
                             </button>
                           </div>
 
-                          {/* Evidence Quote */}
                           {ev.evidence_quote && (
                             <div className="mt-2.5 p-2.5 rounded-xl bg-slate-50 text-xs text-slate-700 border-l-2 border-blue-500 font-medium">
                               "{ev.evidence_quote}"
                             </div>
                           )}
 
-                          {/* Dimension Score Chips */}
                           <div className="mt-3 flex flex-wrap gap-1.5">
                             {DIMENSIONS.map((dim) => {
                               const s = scores[dim.key];
@@ -853,7 +965,6 @@ export default function App() {
                             })}
                           </div>
 
-                          {/* Rationale text */}
                           {ev.rationale && (
                             <p className="mt-2 text-[11px] text-slate-500">
                               <b className="text-slate-700">เหตุผล AI:</b> {ev.rationale}
@@ -871,12 +982,410 @@ export default function App() {
         )}
 
         {/* =========================================================================
-            TAB 2: QUALITY & HUMAN-IN-THE-LOOP CENTER (PHASE 2)
+            TAB 2: THAILAND INTERACTIVE GEO MAP (PHASE 3)
+        ========================================================================= */}
+        {activeMainTab === 'map' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <Map className="w-5 h-5 text-rose-600" />
+                  แผนที่ความตื่นตัวและสุขภาพคุณธรรม 77 จังหวัด (Thailand Moral Geo Map)
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  จำแนกตาม 6 ภูมิภาค • คำนวณถ่วงน้ำหนักตามเหตุการณ์จริงที่เกิดขึ้นในพื้นที่ (สเกล 0.00 – 5.00)
+                </p>
+              </div>
+
+              {/* Region Filter Buttons */}
+              <div className="flex flex-wrap gap-1.5">
+                {['ทั้งหมด', 'ภาคเหนือ', 'ภาคตะวันออกเฉียงเหนือ', 'ภาคกลาง', 'ภาคตะวันออก', 'ภาคตะวันตก', 'ภาคใต้'].map(reg => (
+                  <button
+                    key={reg}
+                    onClick={() => setSelectedRegion(reg)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                      selectedRegion === reg
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {reg}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Regional Summary Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {Object.entries(mapData.regions || {}).map(([regName, rData]) => (
+                <div 
+                  key={regName}
+                  onClick={() => setSelectedRegion(regName)}
+                  className={`p-3.5 rounded-2xl border cursor-pointer transition ${
+                    selectedRegion === regName
+                      ? 'bg-rose-50/80 border-rose-300 ring-2 ring-rose-500/20'
+                      : 'bg-white border-slate-200/80 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="text-[11px] font-bold text-slate-500 block truncate">{regName}</span>
+                  <div className="mt-1 flex items-baseline gap-1.5">
+                    <span className="text-xl font-black text-slate-900">{rData.avg_score.toFixed(2)}</span>
+                    <span className="text-[10px] text-slate-400 font-semibold">/ 5.00</span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between">
+                    <span>{rData.scored_provinces}/{rData.total_provinces} จังหวัด</span>
+                    <span className="font-bold text-slate-600">{rData.total_news} ข่าว</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Province Heatmap Grid */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <span className="text-xs font-bold text-slate-700">
+                  แสดง {filteredMapProvinces.length} จังหวัด (คลิกการ์ดจังหวัดเพื่อดูรายงานเจาะลึก)
+                </span>
+                
+                {/* Color Legend */}
+                <div className="flex items-center gap-2 text-[10px] font-bold">
+                  <span className="flex items-center gap-1 text-rose-700"><span className="w-2 h-2 rounded-full bg-rose-500"></span> วิกฤต (&lt;2.0)</span>
+                  <span className="flex items-center gap-1 text-amber-700"><span className="w-2 h-2 rounded-full bg-amber-500"></span> เฝ้าระวัง (2.0-2.4)</span>
+                  <span className="flex items-center gap-1 text-slate-600"><span className="w-2 h-2 rounded-full bg-slate-400"></span> สมดุล (2.4-2.6)</span>
+                  <span className="flex items-center gap-1 text-blue-700"><span className="w-2 h-2 rounded-full bg-blue-500"></span> เชิงบวก (2.6-3.5)</span>
+                  <span className="flex items-center gap-1 text-emerald-700"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ยอดเยี่ยม (&gt;3.5)</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {filteredMapProvinces.map((prov) => {
+                  const badgeCls = getScoreColorBadge(prov.overall_score);
+                  return (
+                    <div
+                      key={prov.province}
+                      onClick={() => setSelectedProvinceModal(prov)}
+                      className="p-3.5 rounded-xl border border-slate-200 hover:border-rose-400 bg-slate-50/50 hover:bg-white hover:shadow-md cursor-pointer transition flex flex-col justify-between group"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-slate-800 group-hover:text-rose-600 transition truncate">
+                            {prov.province}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">{prov.region}</span>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between">
+                        <span className={`px-2 py-0.5 rounded-md text-xs font-black border ${badgeCls}`}>
+                          {prov.overall_score.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {prov.total_items} ข่าว
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Province Deep-Dive Modal */}
+            {selectedProvinceModal && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 border border-slate-100 animate-scale-in">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-5 h-5 text-rose-600" />
+                        <h3 className="font-black text-slate-900 text-lg">
+                          จังหวัด {selectedProvinceModal.province}
+                        </h3>
+                      </div>
+                      <span className="text-xs text-slate-400 mt-0.5 block">{selectedProvinceModal.region} • สถานะ: {selectedProvinceModal.status}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvinceModal(null)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-2xl flex items-center justify-between border border-slate-200">
+                    <div>
+                      <span className="text-xs text-slate-500 font-bold block">ดัชนีคุณธรรมรวมของพื้นที่</span>
+                      <span className="text-3xl font-black text-slate-900">{selectedProvinceModal.overall_score.toFixed(2)}</span>
+                      <span className="text-xs text-slate-400 font-semibold"> / 5.00</span>
+                    </div>
+                    <span className={`px-3 py-1 rounded-xl text-xs font-bold border ${getScoreColorBadge(selectedProvinceModal.overall_score)}`}>
+                      {selectedProvinceModal.total_items >= 5 ? 'ข้อมูลเพียงพอ' : 'ข้อมูลเบื้องต้น'} ({selectedProvinceModal.total_items} ข่าว)
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <h4 className="text-xs font-bold text-slate-700">คะแนนจำแนกตามมิติคุณธรรม 5 ด้าน:</h4>
+                    {DIMENSIONS.map((dim) => {
+                      const sc = selectedProvinceModal.scores?.[dim.key] || 2.50;
+                      const pct = (sc / 5.0) * 100;
+                      return (
+                        <div key={dim.key} className="space-y-1">
+                          <div className="flex justify-between text-xs font-bold">
+                            <span className="text-slate-700">{dim.name}</span>
+                            <span className="text-slate-900">{sc.toFixed(2)}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: dim.color }}></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvinceModal(null)}
+                      className="px-4 py-2 text-xs font-bold bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition"
+                    >
+                      ปิดหน้าต่าง
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            TAB 3: EMERGING ISSUE CLUSTERS (PHASE 3)
+        ========================================================================= */}
+        {activeMainTab === 'clusters' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-amber-500" />
+                  การจับกลุ่มประเด็นร้อนทางคุณธรรม (Emerging Moral Issue Clusters)
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  ประมวลผลด้วย Semantic Clustering และ Entity Association วิเคราะห์ทิศทางและโมเมนตัมของประเด็นในสังคม
+                </p>
+              </div>
+
+              {graphOverview && (
+                <div className="flex items-center gap-3 text-xs bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                  <span className="text-slate-500">Knowledge Graph:</span>
+                  <span className="font-bold text-slate-800">{graphOverview.total_entities || 12} เอนทิตี</span>
+                  <span>•</span>
+                  <span className="font-bold text-slate-800">{graphOverview.total_contents || 30} ข่าว</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {clusters.map((cluster) => (
+                <div 
+                  key={cluster.id}
+                  className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-md transition space-y-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                          cluster.momentum === 'hot' ? 'bg-rose-100 text-rose-700 animate-pulse' :
+                          cluster.momentum === 'stable' ? 'bg-blue-100 text-blue-700' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>
+                          {cluster.momentum === 'hot' ? '🔥 กำลังเป็นกระแสร้อน' : cluster.momentum === 'stable' ? '📌 มีการติดตามต่อเนื่อง' : '📉 เริ่มคลี่คลาย'}
+                        </span>
+                        <span className="text-xs text-slate-400 font-medium">มิติ: <b className="text-slate-700">{cluster.dimension_name}</b></span>
+                      </div>
+                      <h3 className="text-sm font-black text-slate-900 leading-snug">{cluster.title}</h3>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-lg font-black text-slate-900">{cluster.moral_score.toFixed(2)}</span>
+                      <span className="text-[10px] text-slate-400 block">ดัชนีเฉลี่ย</span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed">
+                    {cluster.summary}
+                  </p>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 pt-2 border-t border-slate-100">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                      {cluster.provinces?.map(p => (
+                        <span key={p} className="px-1.5 py-0.2 rounded bg-slate-100 text-[10px] text-slate-700 font-bold">
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="font-bold text-slate-700">{cluster.article_count} ข่าวที่เกี่ยวข้อง</span>
+                  </div>
+
+                  {/* Representative Articles */}
+                  {cluster.top_articles?.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ข่าวตัวอย่างในประเด็นนี้:</span>
+                      {cluster.top_articles.map((art, idx) => (
+                        <a 
+                          key={idx} 
+                          href={art.url} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="flex items-center justify-between text-xs text-slate-700 hover:text-blue-600 truncate p-1.5 rounded-lg hover:bg-slate-50 transition"
+                        >
+                          <span className="truncate">• {art.title}</span>
+                          <ExternalLink className="w-3 h-3 shrink-0 ml-2 text-slate-400" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            TAB 4: MORAL CHAT AGENT (PHASE 3)
+        ========================================================================= */}
+        {activeMainTab === 'chat' && (
+          <div className="max-w-4xl mx-auto space-y-4">
+            
+            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">SocialEye Moral Assistant</h3>
+                  <p className="text-xs text-slate-500">ตอบคำถามด้วย RAG + Gemma 4 อ้างอิงฐานข้อมูลคุณธรรมจริง ไม่แต่งเติมข้อมูล</p>
+                </div>
+              </div>
+
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Gemma 4 • พร้อมใช้งาน
+              </span>
+            </div>
+
+            {/* Prompt Suggestions */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                'สรุปประเด็นด้านสุจริตที่มีการพูดถึงมากที่สุดในสัปดาห์นี้',
+                'จังหวัดใดมีคะแนนด้านจิตอาสาโดดเด่นและเกิดจากเหตุการณ์ใด?',
+                'วิเคราะห์แนวโน้มวินัยจราจรจากข่าวล่าสุด',
+                'เปรียบเทียบภาพรวมคุณธรรม 5 ด้านระดับประเทศ'
+              ].map((prompt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => handlePromptClick(prompt)}
+                  className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 text-xs text-slate-700 hover:text-indigo-600 transition shadow-2xs"
+                >
+                  💡 {prompt}
+                </button>
+              ))}
+            </div>
+
+            {/* Chat Box */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs flex flex-col h-[34rem]">
+              <div className="flex-1 p-5 overflow-y-auto space-y-4">
+                {chatMessages.map((msg, idx) => (
+                  <div 
+                    key={idx}
+                    className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    {msg.role === 'assistant' && (
+                      <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-1">
+                        <Bot className="w-4 h-4" />
+                      </div>
+                    )}
+
+                    <div className={`max-w-[80%] rounded-2xl p-4 text-xs leading-relaxed ${
+                      msg.role === 'user'
+                        ? 'bg-indigo-600 text-white rounded-br-xs'
+                        : 'bg-slate-50 text-slate-800 border border-slate-200/80 rounded-bl-xs'
+                    }`}>
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                      {/* Source Citations */}
+                      {msg.citations && msg.citations.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-200/70 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider">
+                            แหล่งอ้างอิงจากฐานข้อมูล:
+                          </span>
+                          {msg.citations.map((cite, cIdx) => (
+                            <a
+                              key={cIdx}
+                              href={cite.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center justify-between text-[11px] text-blue-600 hover:underline bg-white p-1.5 rounded border border-slate-200"
+                            >
+                              <span className="truncate">[{cite.source}] {cite.title}</span>
+                              <ExternalLink className="w-3 h-3 shrink-0 ml-1 text-slate-400" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {msg.role === 'user' && (
+                      <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0 mt-1">
+                        <User className="w-4 h-4" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {chatLoading && (
+                  <div className="flex gap-3 items-center text-xs text-slate-400 italic">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                      <Bot className="w-4 h-4 animate-spin" />
+                    </div>
+                    <span>AI กำลังค้นคืนข้อมูลคุณธรรมและประมวลผลคำตอบ...</span>
+                  </div>
+                )}
+                <div ref={chatBottomRef} />
+              </div>
+
+              {/* Chat Input */}
+              <form onSubmit={handleSendChat} className="p-3 border-t border-slate-100 flex items-center gap-2 bg-slate-50/50 rounded-b-2xl">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="พิมพ์คำถามวิเคราะห์คุณธรรมที่ต้องการ (เช่น สรุปประเด็นด้านสุจริต)..."
+                  className="flex-1 text-xs bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!chatInput.trim() || chatLoading}
+                  className={`p-2.5 rounded-xl transition ${
+                    !chatInput.trim() || chatLoading
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
+                  }`}
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
+
+          </div>
+        )}
+
+        {/* =========================================================================
+            TAB 5: QUALITY & HUMAN-IN-THE-LOOP CENTER (PHASE 2)
         ========================================================================= */}
         {activeMainTab === 'quality' && (
           <div className="space-y-6">
 
-            {/* Quality Center Header & Subtabs */}
             <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
@@ -930,9 +1439,7 @@ export default function App() {
             {activeQualitySubtab === 'benchmark' && benchmark && (
               <div className="space-y-6">
                 
-                {/* Benchmark Top Metric Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Gate Passed Card */}
                   <div className={`p-5 rounded-2xl border shadow-xs ${
                     benchmark.overall.gate_passed 
                       ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900' 
@@ -950,7 +1457,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Exact Agreement */}
                   <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Exact Agreement (%)</span>
                     <div className="mt-3 flex items-baseline gap-2">
@@ -964,7 +1470,6 @@ export default function App() {
                     </p>
                   </div>
 
-                  {/* Quadratic Weighted Kappa */}
                   <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Weighted Kappa (QWK)</span>
                     <div className="mt-3 flex items-baseline gap-2">
@@ -980,7 +1485,6 @@ export default function App() {
                     </p>
                   </div>
 
-                  {/* Sample Counts */}
                   <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">ชุดข้อมูลอ้างอิง</span>
                     <div className="mt-3 flex items-baseline gap-2">
@@ -995,7 +1499,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Accuracy by Dimension Matrix */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
                   <div className="pb-4 border-b border-slate-100 flex items-center justify-between">
                     <div>
@@ -1129,7 +1632,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Scores row */}
                         <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap gap-1.5">
                             {DIMENSIONS.map((dim) => {

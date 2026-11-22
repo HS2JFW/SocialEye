@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     # Database (defaults to SQLite if not PostgreSQL)
     DATABASE_URL: str = "sqlite+aiosqlite:///./socialeye.db"
     
+    # Neo4j Graph Database
+    NEO4J_URI: str = "bolt://neo4j:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "socialeye_secret"
+    
     # Ingestion & Evaluation Settings
     INGEST_INTERVAL_MINUTES: int = 60
     MAX_ITEMS_PER_FEED: int = 15

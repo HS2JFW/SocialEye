@@ -25,6 +25,21 @@ services:
     volumes:
       - redisdata:/data
 
+  neo4j:
+    image: neo4j:5-community
+    container_name: socialeye_neo4j
+    restart: always
+    environment:
+      - NEO4J_AUTH=neo4j/socialeye_secret
+      - NEO4J_dbms_memory_pagecache_size=512M
+      - NEO4J_dbms_memory_heap_initial__size=512M
+      - NEO4J_dbms_memory_heap_max__size=1G
+    volumes:
+      - neo4jdata:/data
+    expose:
+      - "7474"
+      - "7687"
+
   backend:
     build:
       context: ./backend
@@ -37,6 +52,9 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://socialeye:socialeye_secret@postgres:5432/socialeye
       - REDIS_URL=redis://redis:6379/0
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=socialeye_secret
       - LITELLM_ENDPOINT=${LITELLM_ENDPOINT:-https://llm.addpay.in.th/v1}
       - LITELLM_API_KEY=${LITELLM_API_KEY}
       - LITELLM_MODEL=${LITELLM_MODEL:-gemma-4-31b-it}
@@ -61,3 +79,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  neo4jdata:
