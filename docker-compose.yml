@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: socialeye_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: socialeye
+      POSTGRES_USER: socialeye
+      POSTGRES_PASSWORD: socialeye_secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socialeye -d socialeye"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: socialeye_redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: socialeye_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://socialeye:socialeye_secret@postgres:5432/socialeye
+      - REDIS_URL=redis://redis:6379/0
+      - LITELLM_ENDPOINT=${LITELLM_ENDPOINT:-https://llm.addpay.in.th/v1}
+      - LITELLM_API_KEY=${LITELLM_API_KEY}
+      - LITELLM_MODEL=${LITELLM_MODEL:-gemma-4-31b-it}
+      - LITELLM_EMBEDDING_MODEL=${LITELLM_EMBEDDING_MODEL:-embeded}
+      - ALLOWED_ORIGINS=*
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: socialeye_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:
+  redisdata:
