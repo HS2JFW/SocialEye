@@ -2,8 +2,10 @@ import json
 import re
 import httpx
 from typing import Dict, Any, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.analyzer.provinces import extract_province
+from app.analyzer.few_shot import get_dynamic_few_shot_prompt
 
 SYSTEM_PROMPT = """คุณคือ AI Agent ผู้เชี่ยวชาญการวิเคราะห์คุณธรรม 5 ด้านตามกรอบศูนย์คุณธรรม (องค์การมหาชน) ประเทศไทย
 คุณธรรม 5 ด้านประกอบด้วย:
@@ -37,9 +39,16 @@ SYSTEM_PROMPT = """คุณคือ AI Agent ผู้เชี่ยวชา
 - ถ้าไม่เกี่ยวกับด้านนั้น ให้ relevant = false และ score = null
 """
 
-async def evaluate_content_with_llm(title: str, text: str) -> Dict[str, Any]:
-    """Calls LiteLLM to evaluate content against the 5 moral dimensions."""
-    prompt = f"หัวข้อข่าว: {title}\n\nเนื้อหา:\n{text[:1500]}"
+async def evaluate_content_with_llm(title: str, text: str, session: Optional[AsyncSession] = None) -> Dict[str, Any]:
+    """Calls LiteLLM with dynamic few-shot in-context learning to evaluate content against the 5 moral dimensions."""
+    few_shot_block = ""
+    if session:
+        try:
+            few_shot_block = await get_dynamic_few_shot_prompt(session, f"{title} {text}")
+        except Exception as e:
+            print(f"[Scoring] Few-shot retrieval notice: {e}")
+
+    prompt = f"{few_shot_block}\nหัวข้อข่าวที่จะประเมิน: {title}\n\nเนื้อหา:\n{text[:1500]}"
     
     headers = {
         "Authorization": f"Bearer {settings.LITELLM_API_KEY}",

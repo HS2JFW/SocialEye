@@ -59,20 +59,29 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                 await session.flush()
                 new_contents_count += 1
 
-                # Evaluate with LLM
-                eval_res = await evaluate_content_with_llm(title, text_content)
+                # Evaluate with LLM (with dynamic few-shot)
+                eval_res = await evaluate_content_with_llm(title, text_content, session=session)
                 
+                orig_scores = {
+                    "sufficiency": eval_res.get("sufficiency", {}).get("score"),
+                    "discipline": eval_res.get("discipline", {}).get("score"),
+                    "integrity": eval_res.get("integrity", {}).get("score"),
+                    "public_mind": eval_res.get("public_mind", {}).get("score"),
+                    "gratitude": eval_res.get("gratitude", {}).get("score"),
+                }
+
                 eval_obj = Evaluation(
                     content_id=content_obj.id,
-                    sufficiency_score=eval_res.get("sufficiency", {}).get("score"),
-                    discipline_score=eval_res.get("discipline", {}).get("score"),
-                    integrity_score=eval_res.get("integrity", {}).get("score"),
-                    public_mind_score=eval_res.get("public_mind", {}).get("score"),
-                    gratitude_score=eval_res.get("gratitude", {}).get("score"),
+                    sufficiency_score=orig_scores["sufficiency"],
+                    discipline_score=orig_scores["discipline"],
+                    integrity_score=orig_scores["integrity"],
+                    public_mind_score=orig_scores["public_mind"],
+                    gratitude_score=orig_scores["gratitude"],
                     evidence_quote=eval_res.get("evidence_quote"),
                     province=eval_res.get("province", "ระดับประเทศ"),
                     flags=eval_res.get("flags", []),
                     rationale=json_rationales(eval_res),
+                    original_ai_scores=orig_scores,
                     evaluated_at=datetime.utcnow()
                 )
                 session.add(eval_obj)

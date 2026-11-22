@@ -1,12 +1,15 @@
 from datetime import datetime, timedelta, date
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db, AsyncSessionLocal
-from app.db.models import Content, Evaluation, DailyIndex, Alert
+from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample
 from app.analyzer.aggregator import DIMENSIONS
 from app.ingest.rss import run_ingestion_pipeline
+from app.analyzer.benchmark import compute_benchmark_metrics
+from app.data.seed_data import seed_golden_dataset
+from app.analyzer.few_shot import get_embedding
 
 router = APIRouter()
 
@@ -152,6 +155,7 @@ async def get_content_feed(limit: int = 30, offset: int = 0, session: AsyncSessi
             "id": content.id,
             "url": content.url,
             "title": content.title,
+            "text": content.text,
             "source": content.source,
             "published_at": content.published_at.isoformat() if content.published_at else None,
             "reach": content.reach,
@@ -167,8 +171,11 @@ async def get_content_feed(limit: int = 30, offset: int = 0, session: AsyncSessi
                     "public_mind": evaluation.public_mind_score,
                     "gratitude": evaluation.gratitude_score
                 },
+                "original_ai_scores": evaluation.original_ai_scores,
                 "rationale": evaluation.rationale,
-                "is_reviewed": evaluation.is_reviewed
+                "is_reviewed": evaluation.is_reviewed,
+                "reviewed_by": evaluation.reviewed_by,
+                "reviewer_notes": evaluation.reviewer_notes
             }
         })
 
@@ -180,11 +187,26 @@ async def review_content_label(
     payload: dict,
     session: AsyncSession = Depends(get_db)
 ):
-    """Allows an analyst or human reviewer to correct moral scores and add review notes."""
-    stmt = select(Evaluation).where(Evaluation.id == evaluation_id)
-    evaluation = (await session.execute(stmt)).scalar_one_or_none()
-    if not evaluation:
+    """
+    Allows an analyst or human reviewer to correct moral scores, add review notes,
+    and optionally promote the sample to the Golden Dataset.
+    """
+    stmt = select(Evaluation, Content).join(Content, Content.id == Evaluation.content_id).where(Evaluation.id == evaluation_id)
+    row = (await session.execute(stmt)).first()
+    if not row:
         raise HTTPException(status_code=404, detail="Evaluation record not found")
+
+    evaluation, content = row
+
+    # Retain original AI scores if not already set
+    if not evaluation.original_ai_scores:
+        evaluation.original_ai_scores = {
+            "sufficiency": evaluation.sufficiency_score,
+            "discipline": evaluation.discipline_score,
+            "integrity": evaluation.integrity_score,
+            "public_mind": evaluation.public_mind_score,
+            "gratitude": evaluation.gratitude_score
+        }
 
     if "sufficiency" in payload:
         evaluation.sufficiency_score = payload["sufficiency"]
@@ -202,10 +224,195 @@ async def review_content_label(
         evaluation.province = payload["province"]
 
     evaluation.is_reviewed = True
-    evaluation.reviewed_by = payload.get("reviewed_by", "Analyst")
+    evaluation.reviewed_by = payload.get("reviewed_by", "Analyst (Expert Review)")
+
+    # Optionally promote to Golden Dataset
+    promoted_to_golden = False
+    if payload.get("promote_to_golden"):
+        emb = await get_embedding(f"{content.title} {content.text}")
+        golden = GoldenSample(
+            title=content.title,
+            text=content.text,
+            source=content.source,
+            sufficiency_score=evaluation.sufficiency_score,
+            discipline_score=evaluation.discipline_score,
+            integrity_score=evaluation.integrity_score,
+            public_mind_score=evaluation.public_mind_score,
+            gratitude_score=evaluation.gratitude_score,
+            evidence_quote=evaluation.evidence_quote or content.title,
+            rationale=payload.get("reviewer_notes") or evaluation.rationale,
+            province=evaluation.province,
+            category=payload.get("category", "general"),
+            embedding=emb,
+            created_by=evaluation.reviewed_by
+        )
+        session.add(golden)
+        promoted_to_golden = True
+
     await session.commit()
 
-    return {"status": "success", "message": "บันทึกการตรวจสอบเรียบร้อย"}
+    return {
+        "status": "success",
+        "message": "บันทึกการตรวจสอบเรียบร้อย" + (" และนำเข้าสู่ชุดข้อมูลทองคำแล้ว" if promoted_to_golden else ""),
+        "promoted_to_golden": promoted_to_golden
+    }
+
+# --- Phase 2: Quality & Human-in-the-Loop Endpoints ---
+
+@router.get("/quality/benchmark")
+async def get_quality_benchmark(session: AsyncSession = Depends(get_db)):
+    """Returns AI vs Human agreement, Cohen's Kappa, QWK, and Target Gate Status (>= 70%)."""
+    metrics = await compute_benchmark_metrics(session)
+    return metrics
+
+@router.get("/quality/queue")
+async def get_review_queue(
+    limit: int = 20,
+    offset: int = 0,
+    status: str = "unreviewed", # "unreviewed", "reviewed", "all"
+    session: AsyncSession = Depends(get_db)
+):
+    """Returns queue of news items prioritized for human evaluation & labeling."""
+    query = select(Content, Evaluation).join(Evaluation, Content.id == Evaluation.content_id)
+    if status == "unreviewed":
+        query = query.where(Evaluation.is_reviewed == False)
+    elif status == "reviewed":
+        query = query.where(Evaluation.is_reviewed == True)
+
+    query = query.order_by(desc(Content.reach), desc(Content.published_at)).offset(offset).limit(limit)
+    rows = (await session.execute(query)).all()
+
+    items = []
+    for content, evaluation in rows:
+        items.append({
+            "id": evaluation.id,
+            "content_id": content.id,
+            "title": content.title,
+            "text": content.text,
+            "source": content.source,
+            "reach": content.reach,
+            "published_at": content.published_at.isoformat() if content.published_at else None,
+            "province": evaluation.province,
+            "evidence_quote": evaluation.evidence_quote,
+            "flags": evaluation.flags or [],
+            "scores": {
+                "sufficiency": evaluation.sufficiency_score,
+                "discipline": evaluation.discipline_score,
+                "integrity": evaluation.integrity_score,
+                "public_mind": evaluation.public_mind_score,
+                "gratitude": evaluation.gratitude_score
+            },
+            "original_ai_scores": evaluation.original_ai_scores,
+            "rationale": evaluation.rationale,
+            "is_reviewed": evaluation.is_reviewed,
+            "reviewed_by": evaluation.reviewed_by,
+            "reviewer_notes": evaluation.reviewer_notes
+        })
+
+    # Count pending
+    count_stmt = select(func.count(Evaluation.id)).where(Evaluation.is_reviewed == False)
+    pending_count = (await session.execute(count_stmt)).scalar() or 0
+
+    return {
+        "pending_count": pending_count,
+        "items": items
+    }
+
+@router.get("/quality/golden-samples")
+async def get_golden_samples(
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db)
+):
+    """Retrieves curated Golden Dataset samples."""
+    stmt = select(GoldenSample)
+    if category:
+        stmt = stmt.where(GoldenSample.category == category)
+    if q:
+        stmt = stmt.where(GoldenSample.title.ilike(f"%{q}%"))
+
+    stmt = stmt.order_by(desc(GoldenSample.id)).offset(offset).limit(limit)
+    samples = (await session.execute(stmt)).scalars().all()
+
+    return {
+        "total": len(samples),
+        "samples": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "text": s.text,
+                "source": s.source,
+                "province": s.province,
+                "category": s.category,
+                "scores": {
+                    "sufficiency": s.sufficiency_score,
+                    "discipline": s.discipline_score,
+                    "integrity": s.integrity_score,
+                    "public_mind": s.public_mind_score,
+                    "gratitude": s.gratitude_score
+                },
+                "evidence_quote": s.evidence_quote,
+                "rationale": s.rationale,
+                "created_by": s.created_by,
+                "has_embedding": bool(s.embedding)
+            }
+            for s in samples
+        ]
+    }
+
+@router.post("/quality/golden-samples")
+async def create_golden_sample(
+    payload: dict,
+    session: AsyncSession = Depends(get_db)
+):
+    """Manually adds a new sample into the Golden Dataset."""
+    title = payload.get("title")
+    text = payload.get("text", "")
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    emb = await get_embedding(f"{title} {text}")
+    sample = GoldenSample(
+        title=title,
+        text=text,
+        source=payload.get("source", "Manual Annotation"),
+        sufficiency_score=payload.get("sufficiency"),
+        discipline_score=payload.get("discipline"),
+        integrity_score=payload.get("integrity"),
+        public_mind_score=payload.get("public_mind"),
+        gratitude_score=payload.get("gratitude"),
+        evidence_quote=payload.get("evidence_quote", ""),
+        rationale=payload.get("rationale", ""),
+        province=payload.get("province", "ระดับประเทศ"),
+        category=payload.get("category", "general"),
+        embedding=emb,
+        created_by=payload.get("created_by", "Expert Panel")
+    )
+    session.add(sample)
+    await session.commit()
+    await session.refresh(sample)
+
+    return {"status": "success", "id": sample.id, "message": "เพิ่มตัวอย่างเข้าชุดข้อมูลทองคำเรียบร้อย"}
+
+@router.delete("/quality/golden-samples/{sample_id}")
+async def delete_golden_sample(sample_id: int, session: AsyncSession = Depends(get_db)):
+    """Deletes a Golden Sample by ID."""
+    stmt = select(GoldenSample).where(GoldenSample.id == sample_id)
+    sample = (await session.execute(stmt)).scalar_one_or_none()
+    if not sample:
+        raise HTTPException(status_code=404, detail="Golden sample not found")
+
+    await session.delete(sample)
+    await session.commit()
+    return {"status": "success", "message": "ลบตัวอย่างเรียบร้อย"}
+
+@router.post("/quality/seed")
+async def trigger_seed_dataset(session: AsyncSession = Depends(get_db)):
+    """Triggers populating initial Golden Dataset."""
+    count = await seed_golden_dataset(session)
+    return {"status": "success", "message": f"นำเข้าชุดข้อมูลทองคำเรียบร้อย (มีทั้งหมด {count} รายการ)"}
 
 @router.get("/alerts")
 async def get_alerts(limit: int = 20, session: AsyncSession = Depends(get_db)):

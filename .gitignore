@@ -54,7 +54,8 @@ out/
 Thumbs.db
 
 # Application data
-data/
+/data/
+!backend/app/data/
 *.db
 *.sqlite3
 pgdata/

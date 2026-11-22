@@ -3,15 +3,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.db.session import init_db
+from app.db.session import init_db, AsyncSessionLocal
 from app.api.routes import router as api_router
 from app.ingest.scheduler import start_scheduler, stop_scheduler
+from app.data.seed_data import seed_golden_dataset
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("[SocialEye] Initializing database...")
     await init_db()
+    try:
+        async with AsyncSessionLocal() as session:
+            await seed_golden_dataset(session)
+    except Exception as e:
+        print(f"[SocialEye] Seed dataset notice: {e}")
+
     print("[SocialEye] Starting background scheduler...")
     try:
         start_scheduler()
