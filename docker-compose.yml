@@ -42,8 +42,8 @@ services:
       - LITELLM_MODEL=${LITELLM_MODEL:-gemma-4-31b-it}
       - LITELLM_EMBEDDING_MODEL=${LITELLM_EMBEDDING_MODEL:-embeded}
       - ALLOWED_ORIGINS=*
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
 
   frontend:
     build:
@@ -53,8 +53,10 @@ services:
     restart: always
     depends_on:
       - backend
+    expose:
+      - "80"
     ports:
-      - "3000:80"
+      - "3880:80"
 
 volumes:
   pgdata:
