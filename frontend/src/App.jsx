@@ -5,10 +5,12 @@ import {
   MapPin, CheckCircle, ExternalLink, Edit3, X, Eye, Info,
   Bell, Activity, Calendar, Search, Filter, ChevronRight,
   Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
-  Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame
+  Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame,
+  Compass, Newspaper
 } from 'lucide-react';
+import ThailandSvgMap from './components/ThailandSvgMap';
 
-const DIMENSIONS = [
+export const DIMENSIONS = [
   { key: 'sufficiency', name: 'พอเพียง', color: '#8b5cf6', bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
   { key: 'discipline', name: 'วินัย', color: '#3b82f6', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
   { key: 'integrity', name: 'สุจริต', color: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
@@ -56,6 +58,8 @@ export default function App() {
   // Phase 3: Intelligence Data (Map, Clusters, Chat, Graph)
   const [mapData, setMapData] = useState({ regions: {}, provinces: [] });
   const [selectedRegion, setSelectedRegion] = useState('ทั้งหมด');
+  const [selectedMapDim, setSelectedMapDim] = useState('overall');
+  const [selectedMapProvince, setSelectedMapProvince] = useState(null);
   const [selectedProvinceModal, setSelectedProvinceModal] = useState(null);
   const [clusters, setClusters] = useState([]);
   const [graphOverview, setGraphOverview] = useState(null);
@@ -202,6 +206,40 @@ export default function App() {
 
   const handlePromptClick = (promptText) => {
     setChatInput(promptText);
+  };
+
+  const handleAskAiProvince = (prov) => {
+    if (!prov) return;
+    const prompt = `สรุปสถานการณ์ดัชนีคุณธรรม 5 ด้านและประเด็นข่าวเด่นล่าสุดในจังหวัด${prov.province} ให้ฟังหน่อย`;
+    setActiveMainTab('chat');
+    const userMsg = { role: 'user', content: prompt };
+    const newMessages = [...chatMessages, userMsg];
+    setChatMessages(newMessages);
+    setChatLoading(true);
+
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: newMessages })
+    })
+      .then(res => res.json())
+      .then(data => {
+        setChatMessages([...newMessages, {
+          role: 'assistant',
+          content: data.reply || 'ขออภัย ระบบไม่สามารถประมวลผลคำตอบได้ในขณะนี้',
+          citations: data.citations || []
+        }]);
+      })
+      .catch(() => {
+        setChatMessages([...newMessages, {
+          role: 'assistant',
+          content: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI Chat Agent โปรดลองอีกครั้ง',
+          citations: []
+        }]);
+      })
+      .finally(() => {
+        setChatLoading(false);
+      });
   };
 
   const triggerIngest = async () => {
@@ -986,89 +1024,391 @@ export default function App() {
         ========================================================================= */}
         {activeMainTab === 'map' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-                  <Map className="w-5 h-5 text-rose-600" />
-                  แผนที่ความตื่นตัวและสุขภาพคุณธรรม 77 จังหวัด (Thailand Moral Geo Map)
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  จำแนกตาม 6 ภูมิภาค • คำนวณถ่วงน้ำหนักตามเหตุการณ์จริงที่เกิดขึ้นในพื้นที่ (สเกล 0.00 – 5.00)
-                </p>
+            
+            {/* Top Bar: Title & Controls */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-900 flex items-center gap-2.5">
+                    <Map className="w-6 h-6 text-rose-600" />
+                    แผนที่ความตื่นตัวและสุขภาพคุณธรรม 77 จังหวัด (Thailand Moral Geo Map)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    ถอดแบบ Vector Path แผนที่ประเทศไทย 77 จังหวัด • สเกล 0.00 – 5.00 คำนวณถ่วงน้ำหนักตามเหตุการณ์จริง
+                  </p>
+                </div>
+
+                {/* Region Filter Buttons */}
+                <div className="flex flex-wrap gap-1.5">
+                  {['ทั้งหมด', 'ภาคเหนือ', 'ภาคตะวันออกเฉียงเหนือ', 'ภาคกลาง', 'ภาคตะวันออก', 'ภาคตะวันตก', 'ภาคใต้'].map(reg => (
+                    <button
+                      key={reg}
+                      onClick={() => setSelectedRegion(reg)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                        selectedRegion === reg
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {reg}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Region Filter Buttons */}
-              <div className="flex flex-wrap gap-1.5">
-                {['ทั้งหมด', 'ภาคเหนือ', 'ภาคตะวันออกเฉียงเหนือ', 'ภาคกลาง', 'ภาคตะวันออก', 'ภาคตะวันตก', 'ภาคใต้'].map(reg => (
+              {/* Dimension Heatmap Selector Bar */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                    <Filter className="w-3.5 h-3.5 text-slate-400" />
+                    เลือกมิติแสดงผลบนแผนที่:
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
                   <button
-                    key={reg}
-                    onClick={() => setSelectedRegion(reg)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-                      selectedRegion === reg
-                        ? 'bg-rose-600 text-white shadow-xs'
+                    onClick={() => setSelectedMapDim('overall')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+                      selectedMapDim === 'overall'
+                        ? 'bg-slate-900 text-white shadow-sm ring-2 ring-slate-900/20'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
-                    {reg}
+                    <Compass className="w-3.5 h-3.5" />
+                    ภาพรวมคุณธรรม
                   </button>
+
+                  {DIMENSIONS.map((dim) => {
+                    const IconComp = DIMENSION_ICONS[dim.key] || Sparkles;
+                    const isActive = selectedMapDim === dim.key;
+                    return (
+                      <button
+                        key={dim.key}
+                        onClick={() => setSelectedMapDim(dim.key)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                          isActive
+                            ? 'bg-white text-slate-900 shadow-sm ring-2 ring-slate-900/10'
+                            : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                        }`}
+                        style={{
+                          borderColor: isActive ? dim.color : '#e2e8f0',
+                          borderWidth: isActive ? '2px' : '1px'
+                        }}
+                      >
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: dim.color }}></span>
+                        <IconComp className="w-3.5 h-3.5" style={{ color: dim.color }} />
+                        {dim.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Main Interactive Map & Inspection Drawer 2-Column Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              
+              {/* Left Column: Interactive Vector Map (7 Cols on LG) */}
+              <div className="lg:col-span-7 xl:col-span-7 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="text-xs font-black text-slate-800">
+                      แผนที่เวกเตอร์ 77 จังหวัด (คลิกเลือกจังหวัดเพื่อวิเคราะห์)
+                    </span>
+                  </div>
+
+                  <span className="text-[11px] font-semibold text-slate-400">
+                    มิติปัจจุบัน: <b className="text-slate-700">{selectedMapDim === 'overall' ? 'ภาพรวมคุณธรรม' : DIMENSIONS.find(d => d.key === selectedMapDim)?.name}</b>
+                  </span>
+                </div>
+
+                {/* SVG Vector Map Container */}
+                <div className="relative bg-gradient-to-b from-slate-50/60 to-slate-100/40 rounded-2xl p-4 border border-slate-100 flex items-center justify-center min-h-[580px]">
+                  <ThailandSvgMap
+                    provincesData={mapData.provinces || []}
+                    selectedDimension={selectedMapDim}
+                    selectedRegion={selectedRegion}
+                    selectedProvince={selectedMapProvince}
+                    onProvinceSelect={(prov) => setSelectedMapProvince(prov)}
+                  />
+                </div>
+
+                {/* Heatmap Legend & Color Scales */}
+                <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center flex-wrap gap-2 text-[11px] font-bold">
+                    <span className="text-slate-400 font-semibold mr-1">เกณฑ์ระดับ:</span>
+                    <span className="flex items-center gap-1 text-rose-700"><span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span> วิกฤต (&lt;2.0)</span>
+                    <span className="flex items-center gap-1 text-amber-700"><span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> เฝ้าระวัง (2.0-2.4)</span>
+                    <span className="flex items-center gap-1 text-slate-600"><span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span> สมดุล (2.4-2.6)</span>
+                    <span className="flex items-center gap-1 text-blue-700"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> เชิงบวก (2.6-3.5)</span>
+                    <span className="flex items-center gap-1 text-emerald-700"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> ยอดเยี่ยม (&gt;3.5)</span>
+                    <span className="flex items-center gap-1 text-slate-400"><span className="w-2.5 h-2.5 rounded-full bg-slate-200 border border-slate-300"></span> ไม่มีข่าว (2.50)</span>
+                  </div>
+
+                  <div className="text-[10px] text-slate-400 italic">
+                    *ข้อมูลอ้างอิงและคำนวณจากคลังข่าวดิจิทัล
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Province Inspection Drawer (5 Cols on LG) */}
+              <div className="lg:col-span-5 xl:col-span-5 space-y-4">
+                
+                {selectedMapProvince ? (
+                  <div className="bg-white rounded-3xl p-6 border border-indigo-200/80 shadow-md space-y-5 animate-fade-in ring-1 ring-indigo-500/10">
+                    
+                    {/* Drawer Header */}
+                    <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-5 h-5 text-rose-600" />
+                          <h3 className="font-black text-slate-900 text-xl">
+                            จังหวัด{selectedMapProvince.province}
+                          </h3>
+                        </div>
+                        <span className="text-xs text-slate-500 mt-1 block">
+                          {selectedMapProvince.region} • ข้อมูลสถานะ: <span className="font-bold text-slate-700">{selectedMapProvince.status || 'ข้อมูลเบื้องต้น'}</span>
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedMapProvince(null)}
+                        className="p-1 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+                        title="ปิดแผงตรวจเจาะลึก"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Overall Score Banner */}
+                    <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-5 rounded-2xl flex items-center justify-between shadow-xs">
+                      <div>
+                        <span className="text-xs text-indigo-200 font-bold block uppercase tracking-wider">ดัชนีคุณธรรมรวมของพื้นที่</span>
+                        <div className="mt-1 flex items-baseline gap-2">
+                          <span className="text-4xl font-black text-white">
+                            {(selectedMapProvince.overall_score ?? 2.50).toFixed(2)}
+                          </span>
+                          <span className="text-xs text-indigo-300 font-medium">/ 5.00 คะแนนเต็ม</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className={`inline-block px-3 py-1 rounded-xl text-xs font-black border ${
+                          selectedMapProvince.total_items >= 5 
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                            : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        }`}>
+                          {selectedMapProvince.total_items >= 5 ? '✓ ข้อมูลเพียงพอ' : 'ข้อมูลเบื้องต้น'}
+                        </span>
+                        <span className="text-[11px] text-indigo-300 block mt-1">
+                          {selectedMapProvince.total_items || 0} ข่าวในระบบ
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 5-Dimension Radar / Horizontal Bars */}
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center justify-between text-xs font-black text-slate-800">
+                        <span>คะแนนจำแนกตามมิติคุณธรรม 5 ด้าน</span>
+                        <span className="text-[10px] text-slate-400 font-semibold">เป้าหมาย &gt; 3.00</span>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {DIMENSIONS.map((dim) => {
+                          const sc = selectedMapProvince.scores?.[dim.key] ?? 2.50;
+                          const pct = Math.min(100, Math.max(0, (sc / 5.0) * 100));
+                          const IconComp = DIMENSION_ICONS[dim.key] || Sparkles;
+                          return (
+                            <div key={dim.key} className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                                  <IconComp className="w-3.5 h-3.5" style={{ color: dim.color }} />
+                                  {dim.name}
+                                </span>
+                                <span className="font-black text-slate-900">{sc.toFixed(2)} / 5.00</span>
+                              </div>
+                              <div className="w-full bg-slate-200/80 h-2 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full rounded-full transition-all duration-500" 
+                                  style={{ width: `${pct}%`, backgroundColor: dim.color }}
+                                ></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Local News in this Province */}
+                    <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between text-xs font-black text-slate-800">
+                        <span className="flex items-center gap-1.5">
+                          <Newspaper className="w-3.5 h-3.5 text-blue-600" />
+                          ข่าวยืนยันในพื้นที่ ({selectedMapProvince.province})
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {feed.filter(f => f.evaluation?.province === selectedMapProvince.province).length} รายการ
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {feed.filter(f => f.evaluation?.province === selectedMapProvince.province).length === 0 ? (
+                          <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-[11px] text-slate-400 text-center">
+                            ยังไม่มีข่าวยืนยันที่ระบุพิกัดจังหวัดนี้โดยตรง (ระบบใช้ค่าเกณฑ์กลาง 2.50)
+                          </div>
+                        ) : (
+                          feed
+                            .filter(f => f.evaluation?.province === selectedMapProvince.province)
+                            .slice(0, 3)
+                            .map((item) => (
+                              <div key={item.id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-blue-200 transition text-xs space-y-1">
+                                <a 
+                                  href={item.url} 
+                                  target="_blank" 
+                                  rel="noreferrer"
+                                  className="font-bold text-slate-800 hover:text-blue-600 line-clamp-1 block"
+                                >
+                                  {item.title}
+                                </a>
+                                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                  <span>{item.source}</span>
+                                  <span>{item.published_at ? new Date(item.published_at).toLocaleDateString('th-TH') : ''}</span>
+                                </div>
+                              </div>
+                            ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 🌟 1-Click AI Deep-Dive Action Button */}
+                    <div className="pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => handleAskAiProvince(selectedMapProvince)}
+                        className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-[0.98] group cursor-pointer"
+                      >
+                        <Bot className="w-4 h-4 text-indigo-200 group-hover:rotate-12 transition-transform" />
+                        <span>🤖 สอบถาม AI วิเคราะห์จังหวัดนี้</span>
+                        <ChevronRight className="w-4 h-4 text-indigo-200 group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </div>
+
+                  </div>
+                ) : (
+                  /* Empty State: Prompting User to Select a Province */
+                  <div className="bg-white rounded-3xl p-8 border border-slate-200/80 shadow-xs space-y-5 text-center flex flex-col items-center justify-center min-h-[500px]">
+                    <div className="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-xs">
+                      <Map className="w-8 h-8 text-indigo-600 animate-bounce" />
+                    </div>
+
+                    <div className="space-y-1.5 max-w-xs">
+                      <h4 className="text-base font-black text-slate-900">
+                        เลือกจังหวัดเพื่อเปิดแผงตรวจเจาะลึก
+                      </h4>
+                      <p className="text-xs text-slate-500">
+                        คลิกบนแผนที่ประเทศไทย หรือเลือกจากจังหวัดตัวอย่างด้านล่าง เพื่อดูดัชนี 5 มิติและสอบถาม AI
+                      </p>
+                    </div>
+
+                    {/* Quick Access Pills for Representative Provinces */}
+                    <div className="pt-2 w-full space-y-2">
+                      <span className="text-[11px] font-bold text-slate-400 block">จังหวัดแนะนำ:</span>
+                      <div className="flex flex-wrap justify-center gap-1.5">
+                        {['กรุงเทพมหานคร', 'เชียงใหม่', 'ขอนแก่น', 'สงขลา', 'ชลบุรี', 'นครราชสีมา'].map((provName) => {
+                          const pData = (mapData.provinces || []).find(p => p.province === provName) || {
+                            province: provName,
+                            overall_score: 2.50,
+                            scores: { sufficiency: 2.5, discipline: 2.5, integrity: 2.5, public_mind: 2.5, gratitude: 2.5 },
+                            total_items: 0,
+                            status: 'ข้อมูลเบื้องต้น',
+                            region: 'ภาคกลาง'
+                          };
+                          return (
+                            <button
+                              key={provName}
+                              onClick={() => setSelectedMapProvince(pData)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 border border-slate-200 text-xs font-bold text-slate-700 transition cursor-pointer"
+                            >
+                              {provName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+
+            {/* Regional Summary Metrics Cards */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-800">
+                  สรุปดัชนีเฉลี่ยจำแนกตาม 6 ภูมิภาค (Regional Moral Summary)
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  คลิกการ์ดภูมิภาคเพื่อกรองรายการ
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {Object.entries(mapData.regions || {}).map(([regName, rData]) => (
+                  <div 
+                    key={regName}
+                    onClick={() => setSelectedRegion(regName)}
+                    className={`p-4 rounded-2xl border cursor-pointer transition ${
+                      selectedRegion === regName
+                        ? 'bg-rose-50/90 border-rose-400 ring-2 ring-rose-500/20 shadow-xs'
+                        : 'bg-slate-50/60 border-slate-200/80 hover:bg-white hover:border-rose-300'
+                    }`}
+                  >
+                    <span className="text-xs font-black text-slate-700 block truncate">{regName}</span>
+                    <div className="mt-1.5 flex items-baseline gap-1">
+                      <span className="text-2xl font-black text-slate-900">{rData.avg_score.toFixed(2)}</span>
+                      <span className="text-[10px] text-slate-400 font-semibold">/ 5.00</span>
+                    </div>
+                    <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between">
+                      <span>{rData.scored_provinces}/{rData.total_provinces} จ.</span>
+                      <span className="font-bold text-slate-600">{rData.total_news} ข่าว</span>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
 
-            {/* Regional Summary Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              {Object.entries(mapData.regions || {}).map(([regName, rData]) => (
-                <div 
-                  key={regName}
-                  onClick={() => setSelectedRegion(regName)}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition ${
-                    selectedRegion === regName
-                      ? 'bg-rose-50/80 border-rose-300 ring-2 ring-rose-500/20'
-                      : 'bg-white border-slate-200/80 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="text-[11px] font-bold text-slate-500 block truncate">{regName}</span>
-                  <div className="mt-1 flex items-baseline gap-1.5">
-                    <span className="text-xl font-black text-slate-900">{rData.avg_score.toFixed(2)}</span>
-                    <span className="text-[10px] text-slate-400 font-semibold">/ 5.00</span>
-                  </div>
-                  <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between">
-                    <span>{rData.scored_provinces}/{rData.total_provinces} จังหวัด</span>
-                    <span className="font-bold text-slate-600">{rData.total_news} ข่าว</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Province Heatmap Grid */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            {/* 77 Provinces Grid Overview */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <span className="text-xs font-bold text-slate-700">
-                  แสดง {filteredMapProvinces.length} จังหวัด (คลิกการ์ดจังหวัดเพื่อดูรายงานเจาะลึก)
+                <span className="text-xs font-black text-slate-800">
+                  ตารางรายชื่อจังหวัด ({filteredMapProvinces.length} จังหวัด)
                 </span>
-                
-                {/* Color Legend */}
-                <div className="flex items-center gap-2 text-[10px] font-bold">
-                  <span className="flex items-center gap-1 text-rose-700"><span className="w-2 h-2 rounded-full bg-rose-500"></span> วิกฤต (&lt;2.0)</span>
-                  <span className="flex items-center gap-1 text-amber-700"><span className="w-2 h-2 rounded-full bg-amber-500"></span> เฝ้าระวัง (2.0-2.4)</span>
-                  <span className="flex items-center gap-1 text-slate-600"><span className="w-2 h-2 rounded-full bg-slate-400"></span> สมดุล (2.4-2.6)</span>
-                  <span className="flex items-center gap-1 text-blue-700"><span className="w-2 h-2 rounded-full bg-blue-500"></span> เชิงบวก (2.6-3.5)</span>
-                  <span className="flex items-center gap-1 text-emerald-700"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ยอดเยี่ยม (&gt;3.5)</span>
-                </div>
+                <span className="text-[11px] text-slate-400">
+                  คลิกเพื่อเปิดการ์ดเจาะลึก
+                </span>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                 {filteredMapProvinces.map((prov) => {
                   const badgeCls = getScoreColorBadge(prov.overall_score);
+                  const isSelected = selectedMapProvince?.province === prov.province;
                   return (
                     <div
                       key={prov.province}
-                      onClick={() => setSelectedProvinceModal(prov)}
-                      className="p-3.5 rounded-xl border border-slate-200 hover:border-rose-400 bg-slate-50/50 hover:bg-white hover:shadow-md cursor-pointer transition flex flex-col justify-between group"
+                      onClick={() => setSelectedMapProvince(prov)}
+                      className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between group ${
+                        isSelected 
+                          ? 'border-indigo-500 bg-indigo-50/50 shadow-xs ring-2 ring-indigo-500/20' 
+                          : 'border-slate-200 hover:border-indigo-300 bg-slate-50/50 hover:bg-white hover:shadow-xs'
+                      }`}
                     >
                       <div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-slate-800 group-hover:text-rose-600 transition truncate">
+                          <span className={`text-xs font-black truncate transition ${
+                            isSelected ? 'text-indigo-700' : 'text-slate-800 group-hover:text-indigo-600'
+                          }`}>
                             {prov.province}
                           </span>
                         </div>
@@ -1076,7 +1416,7 @@ export default function App() {
                       </div>
 
                       <div className="mt-3 flex items-center justify-between">
-                        <span className={`px-2 py-0.5 rounded-md text-xs font-black border ${badgeCls}`}>
+                        <span className={`px-2 py-0.5 rounded-lg text-xs font-black border ${badgeCls}`}>
                           {prov.overall_score.toFixed(2)}
                         </span>
                         <span className="text-[10px] text-slate-400">
@@ -1089,71 +1429,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Province Deep-Dive Modal */}
-            {selectedProvinceModal && (
-              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-                <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 border border-slate-100 animate-scale-in">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-5 h-5 text-rose-600" />
-                        <h3 className="font-black text-slate-900 text-lg">
-                          จังหวัด {selectedProvinceModal.province}
-                        </h3>
-                      </div>
-                      <span className="text-xs text-slate-400 mt-0.5 block">{selectedProvinceModal.region} • สถานะ: {selectedProvinceModal.status}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProvinceModal(null)}
-                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <div className="bg-slate-50 p-4 rounded-2xl flex items-center justify-between border border-slate-200">
-                    <div>
-                      <span className="text-xs text-slate-500 font-bold block">ดัชนีคุณธรรมรวมของพื้นที่</span>
-                      <span className="text-3xl font-black text-slate-900">{selectedProvinceModal.overall_score.toFixed(2)}</span>
-                      <span className="text-xs text-slate-400 font-semibold"> / 5.00</span>
-                    </div>
-                    <span className={`px-3 py-1 rounded-xl text-xs font-bold border ${getScoreColorBadge(selectedProvinceModal.overall_score)}`}>
-                      {selectedProvinceModal.total_items >= 5 ? 'ข้อมูลเพียงพอ' : 'ข้อมูลเบื้องต้น'} ({selectedProvinceModal.total_items} ข่าว)
-                    </span>
-                  </div>
-
-                  <div className="space-y-2 pt-1">
-                    <h4 className="text-xs font-bold text-slate-700">คะแนนจำแนกตามมิติคุณธรรม 5 ด้าน:</h4>
-                    {DIMENSIONS.map((dim) => {
-                      const sc = selectedProvinceModal.scores?.[dim.key] || 2.50;
-                      const pct = (sc / 5.0) * 100;
-                      return (
-                        <div key={dim.key} className="space-y-1">
-                          <div className="flex justify-between text-xs font-bold">
-                            <span className="text-slate-700">{dim.name}</span>
-                            <span className="text-slate-900">{sc.toFixed(2)}</span>
-                          </div>
-                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: dim.color }}></div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProvinceModal(null)}
-                      className="px-4 py-2 text-xs font-bold bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition"
-                    >
-                      ปิดหน้าต่าง
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
