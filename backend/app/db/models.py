@@ -102,3 +102,25 @@ class Alert(Base):
     dimension = Column(String(50), nullable=True)
     triggered_at = Column(DateTime, default=datetime.utcnow, index=True)
     is_resolved = Column(Boolean, default=False)
+
+class PolicyReport(Base):
+    __tablename__ = "policy_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_type = Column(String(50), default="weekly", index=True) # weekly | monthly | custom
+    title = Column(String(512), nullable=False)
+    period_start = Column(String(20), nullable=False) # YYYY-MM-DD
+    period_end = Column(String(20), nullable=False)   # YYYY-MM-DD
+    
+    executive_summary = Column(Text, nullable=False) # บทสรุปผู้บริหาร
+    moral_shifts = Column(JSON, nullable=True)       # การเปลี่ยนแปลง 5 มิติ
+    recommendations = Column(JSON, nullable=True)    # ข้อเสนอแนะเชิงนโยบายและแคมเปญ
+    regional_highlights = Column(JSON, nullable=True)# จุดเด่นรายภูมิภาค
+    metrics_summary = Column(JSON, nullable=True)    # สถิติตัวเลขสรุป
+    
+    status = Column(String(50), default="draft", index=True) # draft | reviewed | published
+    reviewed_by = Column(String(100), nullable=True)
+    reviewer_notes = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

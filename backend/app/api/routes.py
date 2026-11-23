@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, date
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+import csv
+import io
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, File, UploadFile, Response
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db, AsyncSessionLocal
-from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample
+from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample, PolicyReport
 from app.analyzer.aggregator import DIMENSIONS
 from app.ingest.rss import run_ingestion_pipeline
 from app.analyzer.benchmark import compute_benchmark_metrics
@@ -14,6 +17,9 @@ from app.analyzer.clustering import get_issue_clusters
 from app.agent.chat import answer_moral_chat
 from app.analyzer.map_data import get_thailand_map_overview
 from app.rag.graph import graph_manager
+from app.agent.policy_advisor import generate_policy_report, generate_report_printable_html
+from app.ingest.connectors import import_wisesight_data, run_youtube_connector, run_pantip_connector
+from app.db.retention import clean_expired_content, get_backup_and_storage_status
 
 router = APIRouter()
 
@@ -466,3 +472,172 @@ async def trigger_manual_ingest(background_tasks: BackgroundTasks):
     """Manually triggers an ingestion and AI evaluation cycle in the background."""
     background_tasks.add_task(_bg_run_ingest)
     return {"status": "success", "message": "เริ่มกระบวนการดึงและวิเคราะห์ข่าวในพื้นหลังแล้ว ระบบจะอัปเดตข้อมูลอัตโนมัติ"}
+
+# =============================================================================
+# PHASE 4: POLICY REPORTS, DATA CONNECTORS, AND PDPA RETENTION
+# =============================================================================
+
+@router.get("/reports")
+async def get_reports_list(session: AsyncSession = Depends(get_db)):
+    """Lists generated moral policy reports."""
+    stmt = select(PolicyReport).order_by(desc(PolicyReport.created_at)).limit(30)
+    reports = (await session.execute(stmt)).scalars().all()
+    return {"reports": reports}
+
+@router.post("/reports/generate")
+async def create_policy_report(
+    payload: dict,
+    session: AsyncSession = Depends(get_db)
+):
+    """Triggers the Policy Advisor Agent to synthesize a new policy report."""
+    report_type = payload.get("report_type", "weekly")
+    days = int(payload.get("days", 7 if report_type == "weekly" else 30))
+    report = await generate_policy_report(session, report_type=report_type, days=days)
+    return {
+        "status": "success",
+        "message": "สร้างรายงานข้อเสนอแนะเชิงนโยบายสำเร็จ",
+        "report": report
+    }
+
+@router.get("/reports/{report_id}")
+async def get_report_details(report_id: int, session: AsyncSession = Depends(get_db)):
+    """Retrieves full details of a specific policy report."""
+    report = await session.get(PolicyReport, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"report": report}
+
+@router.get("/reports/{report_id}/html", response_class=HTMLResponse)
+async def get_report_printable_view(report_id: int, session: AsyncSession = Depends(get_db)):
+    """Renders official TH Sarabun formatted printable HTML view for Save to PDF."""
+    report = await session.get(PolicyReport, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    html_content = generate_report_printable_html(report)
+    return HTMLResponse(content=html_content, status_code=200)
+
+@router.post("/reports/{report_id}/review")
+async def review_and_publish_report(
+    report_id: int,
+    payload: dict,
+    session: AsyncSession = Depends(get_db)
+):
+    """Allows an Analyst to review, add notes, and publish an AI-drafted report."""
+    report = await session.get(PolicyReport, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    report.status = payload.get("status", "published")
+    report.reviewed_by = payload.get("reviewed_by", "Analyst Panel")
+    report.reviewer_notes = payload.get("reviewer_notes", report.reviewer_notes)
+    if "executive_summary" in payload:
+        report.executive_summary = payload["executive_summary"]
+    
+    await session.commit()
+    await session.refresh(report)
+    return {"status": "success", "message": "อัปเดตและเผยแพร่รายงานสำเร็จ", "report": report}
+
+@router.get("/reports/export/csv")
+async def export_indices_csv(session: AsyncSession = Depends(get_db)):
+    """Exports daily moral indices as UTF-8-BOM CSV compatible with Excel."""
+    stmt = (
+        select(DailyIndex)
+        .where(DailyIndex.province == "ระดับประเทศ")
+        .order_by(desc(DailyIndex.date), DailyIndex.dimension)
+        .limit(200)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+
+    dim_map = dict(DIMENSIONS)
+    output = io.StringIO()
+    # Write UTF-8 BOM
+    output.write("\ufeff")
+    writer = csv.writer(output)
+    writer.writerow(["วันที่ (Date)", "รหัสมิติ (Dimension Key)", "มิติคุณธรรม (Dimension Name)", "คะแนนดัชนี (0.00-5.00)", "จำนวนข่าว (Sample Count)", "ขอบเขต (Scope)"])
+
+    for r in rows:
+        writer.writerow([
+            r.date,
+            r.dimension,
+            dim_map.get(r.dimension, r.dimension),
+            f"{r.score_0_to_5:.2f}",
+            r.sample_count,
+            r.province
+        ])
+
+    csv_data = output.getvalue()
+    return Response(
+        content=csv_data,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="moral_indices_export.csv"'}
+    )
+
+@router.get("/reports/export/provinces/csv")
+async def export_provinces_csv(session: AsyncSession = Depends(get_db)):
+    """Exports 77 provinces moral scores as UTF-8-BOM CSV compatible with Excel."""
+    map_data = await get_thailand_map_overview(session)
+    provinces_list = map_data.get("provinces", [])
+
+    output = io.StringIO()
+    output.write("\ufeff")
+    writer = csv.writer(output)
+    writer.writerow([
+        "จังหวัด (Province)", "ภูมิภาค (Region)", "ดัชนีคุณธรรมรวม (Overall)", 
+        "พอเพียง (Sufficiency)", "มีวินัย (Discipline)", "สุจริต (Integrity)", 
+        "จิตอาสา (Public Mind)", "กตัญญู (Gratitude)", "จำนวนข่าว (News Count)", "สถานะข้อมูล"
+    ])
+
+    for p in provinces_list:
+        scores = p.get("scores", {})
+        writer.writerow([
+            p.get("province"),
+            p.get("region"),
+            f"{p.get('overall_score', 2.50):.2f}",
+            f"{scores.get('sufficiency', 2.50):.2f}",
+            f"{scores.get('discipline', 2.50):.2f}",
+            f"{scores.get('integrity', 2.50):.2f}",
+            f"{scores.get('public_mind', 2.50):.2f}",
+            f"{scores.get('gratitude', 2.50):.2f}",
+            p.get("total_items", 0),
+            p.get("status", "ข้อมูลเบื้องต้น")
+        ])
+
+    csv_data = output.getvalue()
+    return Response(
+        content=csv_data,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="thailand_77_provinces_moral.csv"'}
+    )
+
+@router.post("/ingest/wisesight")
+async def upload_wisesight_file(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db)
+):
+    """Uploads and ingests a Wisesight Trend CSV or JSON file into SocialEye."""
+    contents = await file.read()
+    res = await import_wisesight_data(session, contents, file.filename or "wisesight.csv")
+    return res
+
+@router.post("/ingest/youtube")
+async def trigger_youtube_feed(session: AsyncSession = Depends(get_db)):
+    """Ingests latest video news from Thai news YouTube channels."""
+    res = await run_youtube_connector(session)
+    return res
+
+@router.post("/ingest/pantip")
+async def trigger_pantip_scan(session: AsyncSession = Depends(get_db)):
+    """Triggers Pantip public community discussions scanner."""
+    res = await run_pantip_connector(session)
+    return res
+
+@router.get("/admin/backup")
+async def get_backup_status():
+    """Returns Garage S3 and Cloudflare R2 backup status."""
+    return get_backup_and_storage_status()
+
+@router.post("/admin/retention/run")
+async def trigger_retention_cleanup(session: AsyncSession = Depends(get_db)):
+    """Runs PDPA 90-day retention cleanup on raw data."""
+    res = await clean_expired_content(session, retention_days=90)
+    return res

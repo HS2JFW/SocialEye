@@ -6,7 +6,7 @@ import {
   Bell, Activity, Calendar, Search, Filter, ChevronRight,
   Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
   Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame,
-  Compass, Newspaper
+  Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive
 } from 'lucide-react';
 import ThailandSvgMap from './components/ThailandSvgMap';
 
@@ -64,6 +64,23 @@ export default function App() {
   const [clusters, setClusters] = useState([]);
   const [graphOverview, setGraphOverview] = useState(null);
 
+  // Phase 4: Reports, Connectors & Retention States
+  const [reports, setReports] = useState([]);
+  const [selectedReportModal, setSelectedReportModal] = useState(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportGenType, setReportGenType] = useState('weekly');
+  const [reportReviewerNotes, setReportReviewerNotes] = useState('');
+  const [reportSavingReview, setReportSavingReview] = useState(false);
+  const [wisesightUploading, setWisesightUploading] = useState(false);
+  const [wisesightMsg, setWisesightMsg] = useState('');
+  const [youtubeRunning, setYoutubeRunning] = useState(false);
+  const [youtubeMsg, setYoutubeMsg] = useState('');
+  const [pantipRunning, setPantipRunning] = useState(false);
+  const [pantipMsg, setPantipMsg] = useState('');
+  const [backupInfo, setBackupInfo] = useState(null);
+  const [retentionCleaning, setRetentionCleaning] = useState(false);
+  const [retentionMsg, setRetentionMsg] = useState('');
+
   // Chat Agent States
   const [chatMessages, setChatMessages] = useState([
     {
@@ -93,7 +110,8 @@ export default function App() {
       setLoading(true);
       const [
         resOverview, resFeed, resProvinces, resAlerts, resTimeseries, 
-        resBench, resQueue, resGolden, resMap, resClusters, resGraph
+        resBench, resQueue, resGolden, resMap, resClusters, resGraph,
+        resReports, resBackup
       ] = await Promise.all([
         fetch('/api/indices/overview').then(r => r.json()).catch(() => ({ overview: [] })),
         fetch('/api/feed?limit=30').then(r => r.json()).catch(() => ({ feed: [] })),
@@ -105,7 +123,9 @@ export default function App() {
         fetch('/api/quality/golden-samples?limit=50').then(r => r.json()).catch(() => ({ samples: [] })),
         fetch('/api/map/provinces').then(r => r.json()).catch(() => ({ regions: {}, provinces: [] })),
         fetch('/api/topics/clusters').then(r => r.json()).catch(() => ({ clusters: [] })),
-        fetch('/api/graph/overview').then(r => r.json()).catch(() => null)
+        fetch('/api/graph/overview').then(r => r.json()).catch(() => null),
+        fetch('/api/reports').then(r => r.json()).catch(() => ({ reports: [] })),
+        fetch('/api/admin/backup').then(r => r.json()).catch(() => null)
       ]);
 
       setOverview(resOverview.overview || []);
@@ -118,6 +138,8 @@ export default function App() {
       setMapData(resMap || { regions: {}, provinces: [] });
       setClusters(resClusters.clusters || []);
       setGraphOverview(resGraph);
+      setReports(resReports.reports || []);
+      setBackupInfo(resBackup);
       
       // Timeseries smoothing
       let ts = resTimeseries.timeseries || [];
@@ -240,6 +262,115 @@ export default function App() {
       .finally(() => {
         setChatLoading(false);
       });
+  };
+
+  const handleGenerateReport = async () => {
+    setGeneratingReport(true);
+    try {
+      const res = await fetch('/api/reports/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_type: reportGenType })
+      });
+      const data = await res.json();
+      if (data.report) {
+        setReports(prev => [data.report, ...prev]);
+        setSelectedReportModal(data.report);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const handlePublishReport = async (rep) => {
+    setReportSavingReview(true);
+    try {
+      const res = await fetch(`/api/reports/${rep.id}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'published',
+          reviewed_by: 'คณะผู้วิเคราะห์คุณธรรม',
+          reviewer_notes: reportReviewerNotes || 'ผ่านการตรวจทานและอนุมัติเผยแพร่'
+        })
+      });
+      const data = await res.json();
+      if (data.report) {
+        setReports(prev => prev.map(r => r.id === data.report.id ? data.report : r));
+        setSelectedReportModal(data.report);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setReportSavingReview(false);
+    }
+  };
+
+  const handleUploadWisesight = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setWisesightUploading(true);
+    setWisesightMsg('กำลังอัปโหลดและประมวลผลข้อมูล Wisesight Trend...');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/ingest/wisesight', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      setWisesightMsg(data.message || 'นำเข้าข้อมูลสำเร็จ');
+      fetchData();
+    } catch (err) {
+      setWisesightMsg('เกิดข้อผิดพลาดในการนำเข้าไฟล์');
+    } finally {
+      setWisesightUploading(false);
+    }
+  };
+
+  const handleTriggerYoutube = async () => {
+    setYoutubeRunning(true);
+    setYoutubeMsg('กำลังดึงคลิปข่าวล่าสุดจาก YouTube...');
+    try {
+      const res = await fetch('/api/ingest/youtube', { method: 'POST' });
+      const data = await res.json();
+      setYoutubeMsg(`ดึงและวิเคราะห์คลิปข่าวสำเร็จ (${data.new_videos_ingested || 0} คลิปใหม่)`);
+      fetchData();
+    } catch (e) {
+      setYoutubeMsg('เกิดข้อผิดพลาดในการเชื่อมต่อ YouTube');
+    } finally {
+      setYoutubeRunning(false);
+    }
+  };
+
+  const handleTriggerPantip = async () => {
+    setPantipRunning(true);
+    setPantipMsg('กำลังตรวจสอบกระทู้จิตอาสาและคุณธรรมบน Pantip...');
+    try {
+      const res = await fetch('/api/ingest/pantip', { method: 'POST' });
+      const data = await res.json();
+      setPantipMsg(data.message || 'ตรวจสอบเสร็จสิ้น');
+    } catch (e) {
+      setPantipMsg('เกิดข้อผิดพลาด');
+    } finally {
+      setPantipRunning(false);
+    }
+  };
+
+  const handleRunRetentionCleanup = async () => {
+    setRetentionCleaning(true);
+    setRetentionMsg('กำลังรันกระบวนการ PDPA Data Retention...');
+    try {
+      const res = await fetch('/api/admin/retention/run', { method: 'POST' });
+      const data = await res.json();
+      setRetentionMsg(data.message || 'ลบข้อมูลหมดอายุเรียบร้อย');
+    } catch (e) {
+      setRetentionMsg('เกิดข้อผิดพลาดในการรัน PDPA cleanup');
+    } finally {
+      setRetentionCleaning(false);
+    }
   };
 
   const triggerIngest = async () => {
@@ -403,8 +534,8 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-black tracking-tight text-slate-900">SocialEye</h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 uppercase tracking-wider">
-                  Phase 3 • Intelligence & Map
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700 uppercase tracking-wider">
+                  Phase 4 • Reports & Expansion
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden sm:block">
@@ -474,6 +605,18 @@ export default function App() {
               >
                 <Award className="w-3.5 h-3.5" />
                 <span>ศูนย์วัดคุณภาพ</span>
+              </button>
+
+              <button
+                onClick={() => setActiveMainTab('reports')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  activeMainTab === 'reports'
+                    ? 'bg-white text-purple-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>รายงาน & ข้อมูล</span>
               </button>
             </div>
 
@@ -2030,6 +2173,368 @@ export default function App() {
           </div>
         )}
 
+        {/* =========================================================================
+            TAB 6: POLICY REPORTS, CONNECTORS & RETENTION (PHASE 4)
+        ========================================================================= */}
+        {activeMainTab === 'reports' && (
+          <div className="space-y-6 animate-fade-in">
+            
+            {/* Top Bar: Title & Primary Actions */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-900 flex items-center gap-2.5">
+                    <FileText className="w-6 h-6 text-purple-600" />
+                    ศูนย์รายงานข้อเสนอแนะเชิงนโยบายและนำเข้าข้อมูล (Policy Reports & Data Hub)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    จัดทำร่างรายงานเชิงนโยบายอัตโนมัติด้วย Policy Advisor Agent พร้อมส่งออกเอกสารราชการ (TH Sarabun) และเชื่อมต่อ Wisesight / YouTube / Pantip
+                  </p>
+                </div>
+
+                {/* Top Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <button
+                      onClick={() => setReportGenType('weekly')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        reportGenType === 'weekly' ? 'bg-white text-purple-700 shadow-xs' : 'text-slate-600'
+                      }`}
+                    >
+                      ประจำสัปดาห์ (7 วัน)
+                    </button>
+                    <button
+                      onClick={() => setReportGenType('monthly')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        reportGenType === 'monthly' ? 'bg-white text-purple-700 shadow-xs' : 'text-slate-600'
+                      }`}
+                    >
+                      ประจำเดือน (30 วัน)
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleGenerateReport}
+                    disabled={generatingReport}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition ${
+                      generatingReport
+                        ? 'bg-purple-300 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 active:scale-95'
+                    }`}
+                  >
+                    <Sparkles className={`w-4 h-4 ${generatingReport ? 'animate-spin' : ''}`} />
+                    <span>{generatingReport ? 'AI กำลังประมวลผลร่างรายงาน...' : '✨ สร้างร่างรายงานใหม่'}</span>
+                  </button>
+
+                  <a
+                    href="/api/reports/export/csv"
+                    download="moral_indices_export.csv"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition"
+                    title="ส่งออกดัชนีคุณธรรมรายวันเปิดใน Microsoft Excel"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>ดัชนีรายวัน (Excel)</span>
+                  </a>
+
+                  <a
+                    href="/api/reports/export/provinces/csv"
+                    download="thailand_77_provinces_moral.csv"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition"
+                    title="ส่งออกข้อมูล 77 จังหวัดเปิดใน Microsoft Excel"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>สถิติ 77 จังหวัด (Excel)</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 1: Generated Policy Reports List */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-800 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-purple-600" />
+                  รายการรายงานเชิงนโยบายคุณธรรม ({reports.length} ฉบับ)
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  ร่างโดย AI Advisor Agent • ผ่านการตรวจทานและอนุมัติโดยคณะผู้เชี่ยวชาญ
+                </span>
+              </div>
+
+              {reports.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
+                  <FileText className="w-10 h-10 text-slate-300 mx-auto" />
+                  <p className="text-xs font-bold text-slate-600">ยังไม่มีรายงานที่ถูกสร้างในระบบ</p>
+                  <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                    คลิกปุ่ม "✨ สร้างร่างรายงานใหม่" ด้านบน เพื่อให้ AI Policy Advisor สังเคราะห์สถิติดัชนี 5 ด้านและร่างข้อเสนอแนะเชิงนโยบาย
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {reports.map((rep) => {
+                    const isPublished = rep.status === 'published';
+                    const metrics = rep.metrics_summary || {};
+                    const overall = metrics.overall_score || 2.50;
+                    return (
+                      <div
+                        key={rep.id}
+                        className="p-5 rounded-2xl border border-slate-200/90 hover:border-purple-300 hover:shadow-md transition bg-gradient-to-br from-white to-slate-50/50 space-y-3.5 flex flex-col justify-between"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider mb-1.5 ${
+                                isPublished 
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              }`}>
+                                {isPublished ? '✓ เผยแพร่แล้ว (Published)' : '📝 แบบร่าง (Draft Waiting Review)'}
+                              </span>
+                              <h3 className="text-sm font-black text-slate-900 line-clamp-2">
+                                {rep.title}
+                              </h3>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-xl font-black text-slate-900">{overall.toFixed(2)}</span>
+                              <span className="text-[10px] text-slate-400 font-semibold block">/ 5.00 คะแนน</span>
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                            {rep.executive_summary}
+                          </p>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-slate-400">
+                            ช่วงเวลา: {rep.period_start} ถึง {rep.period_end}
+                          </span>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setSelectedReportModal(rep)}
+                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-purple-50 hover:text-purple-700 text-slate-700 transition flex items-center gap-1"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>ตรวจทาน</span>
+                            </button>
+
+                            <button
+                              onClick={() => window.open(`/api/reports/${rep.id}/html`, '_blank')}
+                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition flex items-center gap-1 shadow-xs"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>PDF (Sarabun)</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: External Connectors & Data Import */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              
+              {/* Connector 1: Wisesight Trend CSV/JSON */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs">
+                      WS
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900">Wisesight Trend Importer</h4>
+                      <span className="text-[10px] text-slate-400">นำเข้าไฟล์เทรนด์โซเชียลมีเดีย (CSV/JSON)</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    รองรับไฟล์สถิติจากแพลตฟอร์ม Zocial Eye / Wisesight เพื่อนำเข้าคอมเมนต์และโพสต์สู่โมเดลประเมินคุณธรรม 5 ด้าน
+                  </p>
+
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-1.5">
+                    <UploadCloud className="w-6 h-6 text-slate-400 mx-auto" />
+                    <label className="cursor-pointer text-xs font-bold text-blue-600 hover:text-blue-700 block">
+                      <span>{wisesightUploading ? 'กำลังนำเข้าข้อมูล...' : 'เลือกไฟล์ CSV หรือ JSON'}</span>
+                      <input
+                        type="file"
+                        accept=".csv,.json"
+                        onChange={handleUploadWisesight}
+                        disabled={wisesightUploading}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {wisesightMsg && (
+                  <div className="p-2 rounded-xl bg-blue-50 text-[11px] font-bold text-blue-700 border border-blue-200">
+                    {wisesightMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* Connector 2: YouTube News Video Connector */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
+                      <Youtube className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900">YouTube News Connector</h4>
+                      <span className="text-[10px] text-slate-400">ช่องข่าวไทย (Thai PBS, Thairath, CH3, Workpoint)</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    เฝ้าติดตามรายการข่าวและคลิปประเด็นสังคมเพื่อสกัดพฤติกรรมคุณธรรมและความคิดเห็นของผู้ชมในพื้นที่
+                  </p>
+
+                  <div className="space-y-1 text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex justify-between">
+                      <span>สถานะช่องข่าว:</span>
+                      <span className="font-bold text-emerald-600">✓ เชื่อมต่อแล้ว 4 ช่อง</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>โหมดการประเมิน:</span>
+                      <span className="font-bold text-slate-700">ชื่อคลิป + คำบรรยาย + LLM</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    onClick={handleTriggerYoutube}
+                    disabled={youtubeRunning}
+                    className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${youtubeRunning ? 'animate-spin' : ''}`} />
+                    <span>{youtubeRunning ? 'กำลังดึงคลิป...' : '🎥 ดึงคลิปข่าวล่าสุด'}</span>
+                  </button>
+
+                  {youtubeMsg && (
+                    <div className="p-2 rounded-xl bg-rose-50 text-[11px] font-bold text-rose-700 border border-rose-200">
+                      {youtubeMsg}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Connector 3: Pantip Community Scanner */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
+                      <MessageCircle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900">Pantip Scanner</h4>
+                      <span className="text-[10px] text-slate-400">สำรวจกระทู้สาธารณะด้านจิตอาสา วินัย และสุจริต</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    ติดตามกระแสพูดคุยในเว็บบอร์ดสาธารณะตามข้อกำหนด robots.txt และระบุ User-Agent อย่างเป็นทางการ
+                  </p>
+
+                  <div className="space-y-1 text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex justify-between">
+                      <span>หมวดหมู่เป้าหมาย:</span>
+                      <span className="font-bold text-purple-700">จิตอาสา, วินัยจราจร, ความโปร่งใส</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>การปฏิบัติตามกฎ:</span>
+                      <span className="font-bold text-emerald-600">✓ Robots.txt Compliant</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    onClick={handleTriggerPantip}
+                    disabled={pantipRunning}
+                    className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-purple-50 hover:text-purple-700 border border-slate-200 text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${pantipRunning ? 'animate-spin' : ''}`} />
+                    <span>{pantipRunning ? 'กำลังสแกน...' : '💬 ตรวจสอบกระทู้คุณธรรม'}</span>
+                  </button>
+
+                  {pantipMsg && (
+                    <div className="p-2 rounded-xl bg-purple-50 text-[11px] font-bold text-purple-700 border border-purple-200">
+                      {pantipMsg}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Section 3: Data Retention & Backup Storage (Hardening) */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-800 flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-slate-700" />
+                  การสำรองข้อมูลและความปลอดภัยตามหลัก PDPA (Data Retention & Storage Hardening)
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  ✓ มาตรฐานการคุ้มครองข้อมูลส่วนบุคคล 90 วัน
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold block">ฐานข้อมูลหลัก (Primary DB):</span>
+                  <p className="font-black text-slate-800">{backupInfo?.primary_database || 'PostgreSQL + pgvector'}</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold block">กราฟความสัมพันธ์ (Graph DB):</span>
+                  <p className="font-black text-slate-800">{backupInfo?.graph_database || 'Neo4j Community (bolt://localhost:7687)'}</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold block">การสำรองข้อมูล (Storage Backup):</span>
+                  <p className="font-black text-slate-800">{backupInfo?.backup_destination || 'Garage S3 / Cloudflare R2'}</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold block">นโยบายล้างข้อมูลดิบ (Retention):</span>
+                  <p className="font-black text-slate-800">{backupInfo?.retention_period || '30 วัน Snapshot / 90 วัน Purge'}</p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <div className="space-y-0.5">
+                  <span className="font-black text-slate-800">ระบบล้างข้อมูลข้อความดิบอัตโนมัติ (Automated PDPA Purge)</span>
+                  <p className="text-[11px] text-slate-500">
+                    ลบเนื้อหาข่าวและข้อความดิบที่มีอายุเกิน 90 วัน โดยรักษาสถิติดัชนีคุณธรรมรวมรายวันและรายงานข้อเสนอแนะเชิงนโยบายไว้อย่างถาวร
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleRunRetentionCleanup}
+                  disabled={retentionCleaning}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition shrink-0 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{retentionCleaning ? 'กำลังล้างข้อมูล...' : 'รัน PDPA Retention Cleanup'}</span>
+                </button>
+              </div>
+
+              {retentionMsg && (
+                <div className="p-3 rounded-2xl bg-emerald-50 text-xs font-bold text-emerald-800 border border-emerald-200">
+                  {retentionMsg}
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
+
       </main>
 
       {/* Review & Labeling Modal (Human-in-the-Loop) */}
@@ -2139,6 +2644,149 @@ export default function App() {
                 {savingLabel ? 'กำลังบันทึก...' : 'บันทึกการตรวจสอบ'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Policy Report Review & Details Modal */}
+      {selectedReportModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-5 border border-slate-100 my-8 animate-scale-in">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider mb-1 ${
+                  selectedReportModal.status === 'published' 
+                    ? 'bg-emerald-100 text-emerald-800' 
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {selectedReportModal.status === 'published' ? '✓ เผยแพร่แล้ว (Published)' : '📝 แบบร่าง (Draft)'}
+                </span>
+                <h3 className="font-black text-slate-900 text-lg">
+                  {selectedReportModal.title}
+                </h3>
+                <span className="text-xs text-slate-400 block mt-0.5">
+                  ช่วงเวลา: {selectedReportModal.period_start} ถึง {selectedReportModal.period_end}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedReportModal(null)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Executive Summary */}
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-black text-slate-800">๑. บทสรุปผู้บริหาร (Executive Summary)</h4>
+              <div className="p-3.5 bg-slate-50 rounded-2xl text-xs text-slate-700 leading-relaxed border border-slate-100">
+                {selectedReportModal.executive_summary}
+              </div>
+            </div>
+
+            {/* 5-Dimension Shifts Table */}
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-black text-slate-800">๒. จุดเปลี่ยนรายมิติคุณธรรม ๕ ด้าน</h4>
+              <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                    <tr>
+                      <th className="p-2.5">มิติคุณธรรม</th>
+                      <th className="p-2.5 text-center">สถานะ</th>
+                      <th className="p-2.5">ข้อสรุปสถานการณ์</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(selectedReportModal.moral_shifts || []).map((ms, idx) => (
+                      <tr key={idx}>
+                        <td className="p-2.5 font-black text-slate-800">{ms.dimension}</td>
+                        <td className="p-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            ms.status === 'เชิงบวก' ? 'bg-emerald-100 text-emerald-800' :
+                            ms.status === 'เฝ้าระวัง' ? 'bg-amber-100 text-amber-800' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {ms.status}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-slate-600">{ms.summary}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Recommendations */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-black text-slate-800">๓. ข้อเสนอแนะเชิงนโยบายและแคมเปญ (Policy Actions)</h4>
+              <div className="space-y-2">
+                {(selectedReportModal.recommendations || []).map((rec, idx) => (
+                  <div key={idx} className="p-3 rounded-2xl bg-purple-50/50 border border-purple-100 text-xs space-y-1">
+                    <span className="font-black text-purple-900 block">📌 {rec.target_group}</span>
+                    <p className="text-slate-700 font-medium"><b>ข้อเสนอแนะ:</b> {rec.action}</p>
+                    <p className="text-slate-500 text-[11px]"><b>เหตุผล:</b> {rec.rationale}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Regional Highlights */}
+            {selectedReportModal.regional_highlights && (
+              <div className="space-y-1.5">
+                <h4 className="text-xs font-black text-slate-800">๔. ข้อสังเกตเชิงพื้นที่และภูมิภาค</h4>
+                <div className="p-3 bg-slate-50 rounded-2xl text-xs text-slate-600 border border-slate-100">
+                  {selectedReportModal.regional_highlights}
+                </div>
+              </div>
+            )}
+
+            {/* Reviewer Note Input (Human-in-the-Loop) */}
+            <div className="space-y-1.5 pt-2 border-t border-slate-100">
+              <label className="text-xs font-black text-slate-800 block">
+                บันทึกการตรวจทานของผู้เชี่ยวชาญ / คณะผู้วิเคราะห์ (Analyst Review):
+              </label>
+              <textarea
+                value={reportReviewerNotes}
+                onChange={(e) => setReportReviewerNotes(e.target.value)}
+                placeholder="ระบุความเห็นเพิ่มเติมเพื่อบันทึกแนบรายงานฉบับทางการ..."
+                rows="2"
+                className="w-full text-xs rounded-xl border border-slate-200 p-2.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              ></textarea>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => window.open(`/api/reports/${selectedReportModal.id}/html`, '_blank')}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1.5"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>🖨️ พิมพ์ / บันทึก PDF (TH Sarabun)</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedReportModal(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                >
+                  ปิดหน้าต่าง
+                </button>
+
+                {selectedReportModal.status !== 'published' && (
+                  <button
+                    type="button"
+                    onClick={() => handlePublishReport(selectedReportModal)}
+                    disabled={reportSavingReview}
+                    className="px-4 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-xs transition"
+                  >
+                    {reportSavingReview ? 'กำลังบันทึก...' : '✓ อนุมัติและเผยแพร่รายงาน'}
+                  </button>
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
       )}
