@@ -6,7 +6,7 @@ import {
   Bell, Activity, Calendar, Search, Filter, ChevronRight,
   Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
   Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame,
-  Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive
+  Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive, MoreHorizontal
 } from 'lucide-react';
 import ThailandSvgMap from './components/ThailandSvgMap';
 
@@ -80,6 +80,7 @@ export default function App() {
   const [backupInfo, setBackupInfo] = useState(null);
   const [retentionCleaning, setRetentionCleaning] = useState(false);
   const [retentionMsg, setRetentionMsg] = useState('');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Chat Agent States
   const [chatMessages, setChatMessages] = useState([
@@ -522,20 +523,20 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-16">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-24 md:pb-16">
       
       {/* Top Header */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200/80 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
               <Eye className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black tracking-tight text-slate-900">SocialEye</h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700 uppercase tracking-wider">
-                  Phase 4 • Reports & Expansion
+                <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900">SocialEye</h1>
+                <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-purple-100 text-purple-700 uppercase tracking-wider">
+                  Mobile & Web
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden sm:block">
@@ -544,9 +545,9 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Main Tabs Navigation */}
-            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-xl">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Desktop Main Tabs Navigation */}
+            <div className="hidden md:flex bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-xl">
               <button
                 onClick={() => setActiveMainTab('dashboard')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
@@ -1772,19 +1773,38 @@ export default function App() {
                 <div ref={chatBottomRef} />
               </div>
 
+              {/* Quick Prompts Pills for Mobile & Web */}
+              <div className="px-3 pt-2.5 pb-1 bg-slate-50/70 border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                {[
+                  "สรุปภาพรวมคุณธรรมระดับประเทศวันนี้",
+                  "จังหวัดไหนมีดัชนีสุจริตสูงสุด",
+                  "ประเด็นตรวจสอบทุจริตล่าสุดมีอะไรบ้าง",
+                  "ข่าวกิจกรรมจิตอาสาเด่นสัปดาห์นี้"
+                ].map((promptText) => (
+                  <button
+                    key={promptText}
+                    type="button"
+                    onClick={() => handlePromptClick(promptText)}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-indigo-50 text-indigo-700 font-bold text-[11px] whitespace-nowrap border border-slate-200 shadow-2xs transition shrink-0 active:scale-95"
+                  >
+                    💬 {promptText}
+                  </button>
+                ))}
+              </div>
+
               {/* Chat Input */}
-              <form onSubmit={handleSendChat} className="p-3 border-t border-slate-100 flex items-center gap-2 bg-slate-50/50 rounded-b-2xl">
+              <form onSubmit={handleSendChat} className="p-3 flex items-center gap-2 bg-slate-50/70 rounded-b-2xl">
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="พิมพ์คำถามวิเคราะห์คุณธรรมที่ต้องการ (เช่น สรุปประเด็นด้านสุจริต)..."
-                  className="flex-1 text-xs bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="พิมพ์คำถามวิเคราะห์คุณธรรมที่ต้องการ..."
+                  className="flex-1 text-xs bg-white border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
                 <button
                   type="submit"
                   disabled={!chatInput.trim() || chatLoading}
-                  className={`p-2.5 rounded-xl transition ${
+                  className={`p-3 rounded-xl transition shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center ${
                     !chatInput.trim() || chatLoading
                       ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
@@ -2787,6 +2807,196 @@ export default function App() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Sheet Drawer for Selected Province (< lg) */}
+      {selectedMapProvince && (
+        <div className="lg:hidden fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-2xl border-t border-indigo-200 p-5 space-y-4 max-h-[85vh] overflow-y-auto animate-slide-up pb-10">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-100 relative">
+            <div 
+              className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto cursor-pointer" 
+              onClick={() => setSelectedMapProvince(null)}
+              title="ปิดแผงตรวจ"
+            ></div>
+            <button
+              onClick={() => setSelectedMapProvince(null)}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition absolute right-0 top-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-rose-600" />
+                <h3 className="font-black text-slate-900 text-lg">
+                  จังหวัด{selectedMapProvince.province}
+                </h3>
+              </div>
+              <span className="text-xs text-slate-500 mt-0.5 block">
+                {selectedMapProvince.region} • {selectedMapProvince.status || 'ข้อมูลเบื้องต้น'}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-black text-slate-900">{(selectedMapProvince.overall_score ?? 2.50).toFixed(2)}</span>
+              <span className="text-[10px] text-slate-400 block font-semibold">/ 5.00 คะแนน</span>
+            </div>
+          </div>
+
+          {/* 5-Dimension Bars */}
+          <div className="space-y-2 pt-1">
+            <span className="text-xs font-black text-slate-800 block">ดัชนีคุณธรรม ๕ ด้าน</span>
+            {DIMENSIONS.map((dim) => {
+              const sc = selectedMapProvince.scores?.[dim.key] ?? 2.50;
+              const pct = Math.min(100, Math.max(0, (sc / 5.0) * 100));
+              const IconComp = DIMENSION_ICONS[dim.key] || Sparkles;
+              return (
+                <div key={dim.key} className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                      <IconComp className="w-3.5 h-3.5" style={{ color: dim.color }} />
+                      {dim.name}
+                    </span>
+                    <span className="font-black text-slate-900">{sc.toFixed(2)}</span>
+                  </div>
+                  <div className="w-full bg-slate-200/80 h-1.5 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: dim.color }}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 1-Click AI Deep-Dive Action Button */}
+          <div className="pt-2">
+            <button
+              onClick={() => {
+                handleAskAiProvince(selectedMapProvince);
+                setSelectedMapProvince(null);
+              }}
+              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+            >
+              <Bot className="w-4 h-4 text-indigo-200" />
+              <span>🤖 สอบถาม AI วิเคราะห์จังหวัดนี้</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Navigation Bar (< md) */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-2 py-1.5 flex items-center justify-around shadow-2xl">
+        <button
+          onClick={() => setActiveMainTab('dashboard')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'dashboard' ? 'text-blue-600 font-black' : 'text-slate-400 font-semibold'
+          }`}
+        >
+          <Activity className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">แดชบอร์ด</span>
+        </button>
+
+        <button
+          onClick={() => setActiveMainTab('map')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'map' ? 'text-rose-600 font-black' : 'text-slate-400 font-semibold'
+          }`}
+        >
+          <Map className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">แผนที่ 77 จ.</span>
+        </button>
+
+        <button
+          onClick={() => setActiveMainTab('clusters')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'clusters' ? 'text-amber-600 font-black' : 'text-slate-400 font-semibold'
+          }`}
+        >
+          <Flame className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">ประเด็นร้อน</span>
+        </button>
+
+        <button
+          onClick={() => setActiveMainTab('chat')}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'chat' ? 'text-indigo-600 font-black' : 'text-slate-400 font-semibold'
+          }`}
+        >
+          <Bot className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">AI Chat</span>
+        </button>
+
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'quality' || activeMainTab === 'reports' ? 'text-purple-600 font-black' : 'text-slate-400 font-semibold'
+          }`}
+        >
+          <MoreHorizontal className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">เพิ่มเติม</span>
+        </button>
+      </nav>
+
+      {/* Mobile More Menu Drawer */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end">
+          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl border-t border-slate-200 animate-slide-up pb-10">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wider">เมนูเพิ่มเติม</span>
+              <button 
+                onClick={() => setMobileMenuOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <button
+                onClick={() => { setActiveMainTab('quality'); setMobileMenuOpen(false); }}
+                className={`p-4 rounded-2xl border flex flex-col items-center text-center gap-2 transition ${
+                  activeMainTab === 'quality'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-xs font-black block">ศูนย์วัดคุณภาพ</span>
+                  <span className="text-[10px] text-slate-400">Benchmark & Golden</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setActiveMainTab('reports'); setMobileMenuOpen(false); }}
+                className={`p-4 rounded-2xl border flex flex-col items-center text-center gap-2 transition ${
+                  activeMainTab === 'reports'
+                    ? 'bg-purple-50 border-purple-300 text-purple-800'
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-xs font-black block">รายงาน & ข้อมูล</span>
+                  <span className="text-[10px] text-slate-400">Policy Reports & Export</span>
+                </div>
+              </button>
+            </div>
+
+            <button
+              onClick={() => { triggerIngest(); setMobileMenuOpen(false); }}
+              disabled={ingesting}
+              className="w-full py-3.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition"
+            >
+              <RefreshCw className={`w-4 h-4 ${ingesting ? 'animate-spin' : ''}`} />
+              <span>{ingesting ? 'กำลังดึงข่าวในพื้นหลัง...' : 'ซิงค์ดึงข่าวและวิเคราะห์ทันที'}</span>
+            </button>
           </div>
         </div>
       )}
