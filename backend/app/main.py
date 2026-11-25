@@ -8,10 +8,12 @@ from app.api.routes import router as api_router
 from app.ingest.scheduler import start_scheduler, stop_scheduler
 from app.data.seed_data import seed_golden_dataset
 from app.rag.graph import graph_manager
+from app.settings_service import seed_default_settings_and_sources
 
 async def _bg_seed():
     try:
         async with AsyncSessionLocal() as session:
+            await seed_default_settings_and_sources(session)
             await seed_golden_dataset(session)
     except Exception as e:
         print(f"[SocialEye] Seed dataset notice: {e}")

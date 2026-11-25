@@ -7,7 +7,7 @@ import {
   Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
   Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame,
   Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive, MoreHorizontal,
-  LogIn, LogOut, Lock, PanelLeftClose, PanelLeftOpen
+  LogIn, LogOut, Lock, PanelLeftClose, PanelLeftOpen, Settings
 } from 'lucide-react';
 import ThailandSvgMap from './components/ThailandSvgMap';
 import {
@@ -126,13 +126,129 @@ export default function App() {
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [seedStatusMsg, setSeedStatusMsg] = useState('');
 
+  // Admin Settings States
+  const [activeSettingsTab, setActiveSettingsTab] = useState('sources');
+  const [sysSettings, setSysSettings] = useState({});
+  const [sysMeta, setSysMeta] = useState({});
+  const [sysRuntime, setSysRuntime] = useState({});
+  const [dataSources, setDataSources] = useState([]);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState('');
+  const [testingChannel, setTestingChannel] = useState('');
+  const [testAlertMsg, setTestAlertMsg] = useState('');
+  const [newSourceName, setNewSourceName] = useState('');
+  const [newSourceUrl, setNewSourceUrl] = useState('');
+  const [newSourceKeywords, setNewSourceKeywords] = useState('');
+  const [addingSource, setAddingSource] = useState(false);
+
+  const fetchAdminData = async () => {
+    try {
+      const [resSet, resSrc, resBak] = await Promise.all([
+        authFetch('/api/admin/settings').then(r => r.ok ? r.json() : null).catch(() => null),
+        authFetch('/api/admin/sources').then(r => r.ok ? r.json() : null).catch(() => null),
+        authFetch('/api/admin/backup').then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+      if (resSet) {
+        setSysSettings(resSet.settings || {});
+        setSysMeta(resSet.meta || {});
+        setSysRuntime(resSet.runtime || {});
+      }
+      if (resSrc) setDataSources(resSrc.sources || []);
+      if (resBak) setBackupInfo(resBak);
+    } catch (e) {
+      console.error('Admin fetch error:', e);
+    }
+  };
+
+  const handleSaveSettings = async (e) => {
+    if (e) e.preventDefault();
+    try {
+      setSavingSettings(true);
+      setSettingsMsg('');
+      const res = await authFetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: sysSettings })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSysSettings(data.settings || sysSettings);
+        setSysMeta(data.meta || sysMeta);
+        setSettingsMsg('บันทึกการตั้งค่าระบบเรียบร้อย');
+      } else {
+        setSettingsMsg(data.detail || 'ไม่สามารถบันทึกการตั้งค่าได้');
+      }
+    } catch {
+      setSettingsMsg('เกิดข้อผิดพลาดในการเชื่อมต่อ');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleTestAlert = async (channel) => {
+    try {
+      setTestingChannel(channel);
+      setTestAlertMsg('');
+      const res = await authFetch('/api/admin/alerts/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel })
+      });
+      const data = await res.json();
+      setTestAlertMsg(data.message || 'ทดสอบเสร็จสิ้น');
+    } catch {
+      setTestAlertMsg('เกิดข้อผิดพลาดในการทดสอบแจ้งเตือน');
+    } finally {
+      setTestingChannel('');
+    }
+  };
+
+  const handleAddSource = async (e) => {
+    e.preventDefault();
+    if (!newSourceName.trim() || !newSourceUrl.trim()) return;
+    try {
+      setAddingSource(true);
+      const res = await authFetch('/api/admin/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newSourceName.trim(),
+          url: newSourceUrl.trim(),
+          keywords: newSourceKeywords
+        })
+      });
+      if (res.ok) {
+        setNewSourceName('');
+        setNewSourceUrl('');
+        setNewSourceKeywords('');
+        await fetchAdminData();
+      }
+    } finally {
+      setAddingSource(false);
+    }
+  };
+
+  const handleToggleSource = async (src) => {
+    await authFetch(`/api/admin/sources/${src.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_enabled: !src.is_enabled })
+    });
+    fetchAdminData();
+  };
+
+  const handleDeleteSource = async (id) => {
+    await authFetch(`/api/admin/sources/${id}`, { method: 'DELETE' });
+    fetchAdminData();
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
       const [
         resOverview, resFeed, resProvinces, resAlerts, resTimeseries, 
         resBench, resQueue, resGolden, resMap, resClusters, resGraph,
-        resReports, resBackup
+        resReports
       ] = await Promise.all([
         authFetch('/api/indices/overview').then(r => r.json()).catch(() => ({ overview: [] })),
         authFetch('/api/feed?limit=30').then(r => r.json()).catch(() => ({ feed: [] })),
@@ -145,8 +261,7 @@ export default function App() {
         authFetch('/api/map/provinces').then(r => r.json()).catch(() => ({ regions: {}, provinces: [] })),
         authFetch('/api/topics/clusters').then(r => r.json()).catch(() => ({ clusters: [] })),
         authFetch('/api/graph/overview').then(r => r.json()).catch(() => null),
-        authFetch('/api/reports').then(r => r.json()).catch(() => ({ reports: [] })),
-        authFetch('/api/admin/backup').then(r => r.json()).catch(() => null)
+        authFetch('/api/reports').then(r => r.json()).catch(() => ({ reports: [] }))
       ]);
 
       setOverview(resOverview.overview || []);
@@ -160,7 +275,6 @@ export default function App() {
       setClusters(resClusters.clusters || []);
       setGraphOverview(resGraph);
       setReports(resReports.reports || []);
-      setBackupInfo(resBackup);
       
       // Timeseries smoothing
       let ts = resTimeseries.timeseries || [];
@@ -226,6 +340,9 @@ export default function App() {
           setCurrentUser(me);
           setAuthReady(true);
           fetchData();
+          if (me.role === 'admin') {
+            fetchAdminData();
+          }
         } else if (meRes.status === 403) {
           const err = await meRes.json().catch(() => ({}));
           setAuthError(err.detail || 'บัญชีของคุณยังไม่ได้รับสิทธิ์เข้าใช้งาน SocialEye');
@@ -704,7 +821,13 @@ export default function App() {
         { id: 'quality', label: 'ศูนย์วัดคุณภาพ', desc: 'ตรวจสอบความแม่นยำและชุดข้อมูลทองคำ', icon: Award },
         { id: 'reports', label: 'รายงานและข้อมูล', desc: 'รายงานเชิงนโยบายและส่งออกข้อมูล', icon: FileText },
       ]
-    }
+    },
+    ...(isAdmin ? [{
+      title: 'ผู้ดูแลระบบ',
+      items: [
+        { id: 'settings', label: 'ตั้งค่าระบบ', desc: 'จัดการแหล่งข้อมูล การแจ้งเตือน และนโยบาย PDPA', icon: Settings },
+      ]
+    }] : [])
   ];
 
   const activeNavMeta = navGroups.flatMap(g => g.items).find(i => i.id === activeMainTab) || navGroups[0].items[0];
@@ -2592,207 +2715,559 @@ export default function App() {
               )}
             </div>
 
-            {/* Section 2: External Connectors & Data Import (Admin Only) */}
-            {isAdmin && (
-            <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              
-              {/* Connector 1: Wisesight Trend CSV/JSON */}
-              <div className="bg-white rounded-xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs">
-                      WS
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900">Wisesight Trend Importer</h4>
-                      <span className="text-[10px] text-slate-400">นำเข้าไฟล์เทรนด์โซเชียลมีเดีย (CSV/JSON)</span>
-                    </div>
-                  </div>
+          </div>
+        )}
 
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    รองรับไฟล์สถิติจากแพลตฟอร์ม Zocial Eye / Wisesight เพื่อนำเข้าคอมเมนต์และโพสต์สู่โมเดลประเมินคุณธรรม 5 ด้าน
-                  </p>
-
-                  <div className="p-3 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-1.5">
-                    <UploadCloud className="w-6 h-6 text-slate-400 mx-auto" />
-                    <label className="cursor-pointer text-xs font-bold text-blue-600 hover:text-blue-700 block">
-                      <span>{wisesightUploading ? 'กำลังนำเข้าข้อมูล...' : 'เลือกไฟล์ CSV หรือ JSON'}</span>
-                      <input
-                        type="file"
-                        accept=".csv,.json"
-                        onChange={handleUploadWisesight}
-                        disabled={wisesightUploading}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {wisesightMsg && (
-                  <div className="p-2 rounded-xl bg-blue-50 text-[11px] font-bold text-blue-700 border border-blue-200">
-                    {wisesightMsg}
-                  </div>
-                )}
-              </div>
-
-              {/* Connector 2: YouTube News Video Connector */}
-              <div className="bg-white rounded-xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
-                      <Youtube className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900">YouTube News Connector</h4>
-                      <span className="text-[10px] text-slate-400">ช่องข่าวไทย (Thai PBS, Thairath, CH3, Workpoint)</span>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    เฝ้าติดตามรายการข่าวและคลิปประเด็นสังคมเพื่อสกัดพฤติกรรมคุณธรรมและความคิดเห็นของผู้ชมในพื้นที่
-                  </p>
-
-                  <div className="space-y-1 text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <div className="flex justify-between">
-                      <span>สถานะช่องข่าว:</span>
-                      <span className="font-bold text-emerald-600">✓ เชื่อมต่อแล้ว 4 ช่อง</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>โหมดการประเมิน:</span>
-                      <span className="font-bold text-slate-700">ชื่อคลิป + คำบรรยาย + LLM</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={handleTriggerYoutube}
-                    disabled={youtubeRunning}
-                    className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${youtubeRunning ? 'animate-spin' : ''}`} />
-                    <span>{youtubeRunning ? 'กำลังดึงคลิป...' : 'ดึงคลิปข่าวล่าสุด'}</span>
-                  </button>
-
-                  {youtubeMsg && (
-                    <div className="p-2 rounded-xl bg-rose-50 text-[11px] font-bold text-rose-700 border border-rose-200">
-                      {youtubeMsg}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Connector 3: Pantip Community Scanner */}
-              <div className="bg-white rounded-xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
-                      <MessageCircle className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900">Pantip Scanner</h4>
-                      <span className="text-[10px] text-slate-400">สำรวจกระทู้สาธารณะด้านจิตอาสา วินัย และสุจริต</span>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    ติดตามกระแสพูดคุยในเว็บบอร์ดสาธารณะตามข้อกำหนด robots.txt และระบุ User-Agent อย่างเป็นทางการ
-                  </p>
-
-                  <div className="space-y-1 text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <div className="flex justify-between">
-                      <span>หมวดหมู่เป้าหมาย:</span>
-                      <span className="font-bold text-purple-700">จิตอาสา, วินัยจราจร, ความโปร่งใส</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>การปฏิบัติตามกฎ:</span>
-                      <span className="font-bold text-emerald-600">✓ Robots.txt Compliant</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={handleTriggerPantip}
-                    disabled={pantipRunning}
-                    className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-purple-50 hover:text-purple-700 border border-slate-200 text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${pantipRunning ? 'animate-spin' : ''}`} />
-                    <span>{pantipRunning ? 'กำลังสแกน...' : 'ตรวจสอบกระทู้คุณธรรม'}</span>
-                  </button>
-
-                  {pantipMsg && (
-                    <div className="p-2 rounded-xl bg-purple-50 text-[11px] font-bold text-purple-700 border border-purple-200">
-                      {pantipMsg}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* Section 3: Data Retention & Backup Storage (Hardening) */}
-            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <span className="text-xs font-black text-slate-800 flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-slate-700" />
-                  การสำรองข้อมูลและความปลอดภัยตามหลัก PDPA (Data Retention & Storage Hardening)
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  ✓ มาตรฐานการคุ้มครองข้อมูลส่วนบุคคล 90 วัน
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
-                  <span className="text-[10px] text-slate-400 font-bold block">ฐานข้อมูลหลัก (Primary DB):</span>
-                  <p className="font-black text-slate-800">{backupInfo?.primary_database || 'PostgreSQL + pgvector'}</p>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
-                  <span className="text-[10px] text-slate-400 font-bold block">กราฟความสัมพันธ์ (Graph DB):</span>
-                  <p className="font-black text-slate-800">{backupInfo?.graph_database || 'Neo4j Community (bolt://localhost:7687)'}</p>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
-                  <span className="text-[10px] text-slate-400 font-bold block">การสำรองข้อมูล (Storage Backup):</span>
-                  <p className="font-black text-slate-800">{backupInfo?.backup_destination || 'Garage S3 / Cloudflare R2'}</p>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
-                  <span className="text-[10px] text-slate-400 font-bold block">นโยบายล้างข้อมูลดิบ (Retention):</span>
-                  <p className="font-black text-slate-800">{backupInfo?.retention_period || '30 วัน Snapshot / 90 วัน Purge'}</p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                <div className="space-y-0.5">
-                  <span className="font-black text-slate-800">ระบบล้างข้อมูลข้อความดิบอัตโนมัติ (Automated PDPA Purge)</span>
-                  <p className="text-[11px] text-slate-500">
-                    ลบเนื้อหาข่าวและข้อความดิบที่มีอายุเกิน 90 วัน โดยรักษาสถิติดัชนีคุณธรรมรวมรายวันและรายงานข้อเสนอแนะเชิงนโยบายไว้อย่างถาวร
-                  </p>
-                </div>
-
+        {/* =========================================================================
+            TAB 7: SYSTEM SETTINGS (ADMIN ONLY)
+        ========================================================================= */}
+        {activeMainTab === 'settings' && isAdmin && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Settings Subtabs */}
+            <div className="bg-white rounded-xl p-2 border border-slate-200 flex flex-wrap gap-1.5">
+              {[
+                { id: 'sources', label: 'แหล่งข้อมูลและคำค้น' },
+                { id: 'ingestion', label: 'การดึงข้อมูลและงบ AI' },
+                { id: 'alerts', label: 'การแจ้งเตือนและช่องทาง' },
+                { id: 'system', label: 'PDPA ผู้ใช้ และระบบ' },
+              ].map((t) => (
                 <button
-                  onClick={handleRunRetentionCleanup}
-                  disabled={retentionCleaning}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition shrink-0 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  key={t.id}
+                  onClick={() => { setActiveSettingsTab(t.id); setSettingsMsg(''); setTestAlertMsg(''); }}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
+                    activeSettingsTab === t.id
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{retentionCleaning ? 'กำลังล้างข้อมูล...' : 'รัน PDPA Retention Cleanup'}</span>
+                  {t.label}
                 </button>
-              </div>
-
-              {retentionMsg && (
-                <div className="p-3 rounded-2xl bg-emerald-50 text-xs font-bold text-emerald-800 border border-emerald-200">
-                  {retentionMsg}
-                </div>
-              )}
+              ))}
             </div>
-            </>
+
+            {settingsMsg && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{settingsMsg}</span>
+              </div>
             )}
 
+            {/* SUBTAB 1: DATA SOURCES & CONNECTORS */}
+            {activeSettingsTab === 'sources' && (
+              <div className="space-y-6">
+                {/* Add New RSS / Google News Source */}
+                <div className="bg-white rounded-xl p-5 border border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">เพิ่มแหล่งข้อมูล RSS / Google News</h3>
+                      <p className="text-xs text-slate-500">กำหนด URL ของฟีดข่าวและคำค้น (Keywords) เพื่อคัดกรองเฉพาะข่าวที่เกี่ยวข้อง</p>
+                    </div>
+                  </div>
+                  <form onSubmit={handleAddSource} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <input
+                      type="text"
+                      value={newSourceName}
+                      onChange={(e) => setNewSourceName(e.target.value)}
+                      placeholder="ชื่อแหล่งข้อมูล (เช่น มติชน)"
+                      required
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <input
+                      type="url"
+                      value={newSourceUrl}
+                      onChange={(e) => setNewSourceUrl(e.target.value)}
+                      placeholder="https://example.com/feed"
+                      required
+                      className="md:col-span-2 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newSourceKeywords}
+                        onChange={(e) => setNewSourceKeywords(e.target.value)}
+                        placeholder="คำค้นคั่นด้วย , (ไม่บังคับ)"
+                        className="flex-1 min-w-0 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                      />
+                      <button
+                        type="submit"
+                        disabled={addingSource}
+                        className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition shrink-0"
+                      >
+                        {addingSource ? 'กำลังเพิ่ม...' : 'เพิ่มแหล่ง'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Data Sources List */}
+                <div className="bg-white rounded-xl p-5 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <h3 className="text-sm font-bold text-slate-900">รายการแหล่งข้อมูลที่ตั้งค่าไว้ ({dataSources.length} แหล่ง)</h3>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {dataSources.map((src) => (
+                      <div key={src.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-900">{src.name}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 uppercase">
+                              {src.source_type}
+                            </span>
+                            {!src.is_enabled && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                ปิดใช้งาน
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400 truncate">{src.url}</p>
+                          {src.keywords && src.keywords.length > 0 && (
+                            <p className="text-[11px] text-slate-600">คำค้น: {src.keywords.join(', ')}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleToggleSource(src)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                              src.is_enabled
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                            }`}
+                          >
+                            {src.is_enabled ? 'เปิดใช้งานอยู่' : 'เปิดใช้งาน'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource(src.id)}
+                            title="ลบแหล่งข้อมูล"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* External Connectors (Wisesight, YouTube, Pantip) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {/* Connector 1: Wisesight Trend CSV/JSON */}
+                  <div className="bg-white rounded-xl p-5 border border-slate-200 space-y-3 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-xs">
+                          WS
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900">Wisesight Trend Importer</h4>
+                          <span className="text-[10px] text-slate-400">นำเข้าไฟล์เทรนด์โซเชียล (CSV/JSON)</span>
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-slate-50 border border-dashed border-slate-300 text-center space-y-1.5">
+                        <UploadCloud className="w-5 h-5 text-slate-400 mx-auto" />
+                        <label className="cursor-pointer text-xs font-semibold text-slate-800 hover:underline block">
+                          <span>{wisesightUploading ? 'กำลังนำเข้าข้อมูล...' : 'เลือกไฟล์ CSV หรือ JSON'}</span>
+                          <input
+                            type="file"
+                            accept=".csv,.json"
+                            onChange={handleUploadWisesight}
+                            disabled={wisesightUploading}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    {wisesightMsg && (
+                      <div className="p-2 rounded-lg bg-slate-100 text-[11px] font-semibold text-slate-700">
+                        {wisesightMsg}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Connector 2: YouTube News Video Connector */}
+                  <div className="bg-white rounded-xl p-5 border border-slate-200 space-y-3 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">
+                          <Youtube className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900">YouTube News Connector</h4>
+                          <span className="text-[10px] text-slate-400">Thai PBS, Thairath, CH3, Workpoint</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-500">ดึงรายการข่าวล่าสุดจากช่องข่าวหลักบน YouTube เข้าสู่ระบบประเมิน</p>
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        onClick={handleTriggerYoutube}
+                        disabled={youtubeRunning}
+                        className="w-full py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${youtubeRunning ? 'animate-spin' : ''}`} />
+                        <span>{youtubeRunning ? 'กำลังดึงคลิป...' : 'ดึงคลิปข่าวล่าสุด'}</span>
+                      </button>
+                      {youtubeMsg && (
+                        <div className="p-2 rounded-lg bg-slate-100 text-[11px] font-semibold text-slate-700">
+                          {youtubeMsg}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Connector 3: Pantip Community Scanner */}
+                  <div className="bg-white rounded-xl p-5 border border-slate-200 space-y-3 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">
+                          <MessageCircle className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900">Pantip Scanner</h4>
+                          <span className="text-[10px] text-slate-400">กระทู้สาธารณะ (Robots.txt Compliant)</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-500">สำรวจกระทู้สาธารณะด้านจิตอาสา วินัย และความโปร่งใส</p>
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        onClick={handleTriggerPantip}
+                        disabled={pantipRunning}
+                        className="w-full py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${pantipRunning ? 'animate-spin' : ''}`} />
+                        <span>{pantipRunning ? 'กำลังสแกน...' : 'ตรวจสอบกระทู้คุณธรรม'}</span>
+                      </button>
+                      {pantipMsg && (
+                        <div className="p-2 rounded-lg bg-slate-100 text-[11px] font-semibold text-slate-700">
+                          {pantipMsg}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUBTAB 2: INGESTION & LLM BUDGET */}
+            {activeSettingsTab === 'ingestion' && (
+              <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-5">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-bold text-slate-900">รอบเวลาการดึงข้อมูลและเพดานงบประมาณ LLM</h3>
+                  <p className="text-xs text-slate-500">ปรับความถี่ของ Background Scheduler และจำนวนข่าวต่อฟีด (มีผลทันทีหลังบันทึก)</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">ความถี่ในการดึงข่าวอัตโนมัติ (นาที)</label>
+                    <input
+                      type="number"
+                      min="5"
+                      value={sysSettings.ingest_interval_minutes ?? 60}
+                      onChange={(e) => setSysSettings({ ...sysSettings, ingest_interval_minutes: Number(e.target.value) })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <span className="text-[11px] text-slate-400 block">ขั้นต่ำ 5 นาที (ค่าแนะนำ 60 นาที)</span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">จำนวนข่าวสูงสุดต่อฟีด / รอบ</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={sysSettings.max_items_per_feed ?? 15}
+                      onChange={(e) => setSysSettings({ ...sysSettings, max_items_per_feed: Number(e.target.value) })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">งบประมาณประมวลผล LLM ต่อวัน (บาท)</label>
+                    <input
+                      type="number"
+                      min="10"
+                      step="10"
+                      value={sysSettings.daily_budget_thb ?? 500}
+                      onChange={(e) => setSysSettings({ ...sysSettings, daily_budget_thb: Number(e.target.value) })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between border-t border-slate-100">
+                  <span className="text-[11px] text-slate-400">
+                    {sysMeta.ingest_interval_minutes?.updated_by ? `แก้ไขล่าสุดโดย: ${sysMeta.ingest_interval_minutes.updated_by}` : ''}
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition"
+                  >
+                    {savingSettings ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* SUBTAB 3: ALERTS & NOTIFICATION CHANNELS */}
+            {activeSettingsTab === 'alerts' && (
+              <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-6">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-bold text-slate-900">เกณฑ์การแจ้งเตือนและช่องทางส่งออก (Alert Rules & Channels)</h3>
+                  <p className="text-xs text-slate-500">ค่า Token และรหัสผ่านจะถูกซ่อนเป็น •••••••• หลังบันทึก และไม่ส่งกลับมายังเบราว์เซอร์</p>
+                </div>
+
+                {testAlertMsg && (
+                  <div className="p-3 rounded-lg bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-800">
+                    {testAlertMsg}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">เกณฑ์การเปลี่ยนแปลงดัชนี 24 ชม. (±)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.05"
+                      max="2.0"
+                      value={sysSettings.alert_shift_threshold ?? 0.30}
+                      onChange={(e) => setSysSettings({ ...sysSettings, alert_shift_threshold: Number(e.target.value) })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">ระยะเวลา Cooldown กันแจ้งเตือนซ้ำ (ชั่วโมง)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="168"
+                      value={sysSettings.alert_cooldown_hours ?? 24}
+                      onChange={(e) => setSysSettings({ ...sysSettings, alert_cooldown_hours: Number(e.target.value) })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* LINE OA */}
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(sysSettings.alert_line_enabled)}
+                        onChange={(e) => setSysSettings({ ...sysSettings, alert_line_enabled: e.target.checked })}
+                        className="rounded border-slate-300"
+                      />
+                      <span>เปิดใช้การแจ้งเตือนผ่าน LINE Official Account (Messaging API)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleTestAlert('line')}
+                      disabled={testingChannel === 'line'}
+                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 transition"
+                    >
+                      {testingChannel === 'line' ? 'กำลังส่ง...' : 'ทดสอบส่ง LINE'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      type="password"
+                      value={sysSettings.line_channel_access_token ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, line_channel_access_token: e.target.value })}
+                      placeholder="LINE Channel Access Token"
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={sysSettings.line_target_id ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, line_target_id: e.target.value })}
+                      placeholder="LINE User / Group ID"
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Email SMTP */}
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(sysSettings.alert_email_enabled)}
+                        onChange={(e) => setSysSettings({ ...sysSettings, alert_email_enabled: e.target.checked })}
+                        className="rounded border-slate-300"
+                      />
+                      <span>เปิดใช้การแจ้งเตือนทางอีเมล (SMTP)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleTestAlert('email')}
+                      disabled={testingChannel === 'email'}
+                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 transition"
+                    >
+                      {testingChannel === 'email' ? 'กำลังส่ง...' : 'ทดสอบส่ง Email'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={sysSettings.smtp_host ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, smtp_host: e.target.value })}
+                      placeholder="SMTP Host (เช่น smtp.gmail.com)"
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <input
+                      type="number"
+                      value={sysSettings.smtp_port ?? 587}
+                      onChange={(e) => setSysSettings({ ...sysSettings, smtp_port: Number(e.target.value) })}
+                      placeholder="SMTP Port (587)"
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={sysSettings.smtp_user ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, smtp_user: e.target.value })}
+                      placeholder="SMTP Username"
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <input
+                      type="password"
+                      value={sysSettings.smtp_password ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, smtp_password: e.target.value })}
+                      placeholder="SMTP Password"
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={sysSettings.alert_email_recipients ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, alert_email_recipients: e.target.value })}
+                      placeholder="อีเมลผู้รับ (คั่นด้วย ,)"
+                      className="md:col-span-2 px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition"
+                  >
+                    {savingSettings ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่าการแจ้งเตือน'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* SUBTAB 4: PDPA, USERS & SYSTEM */}
+            {activeSettingsTab === 'system' && (
+              <div className="space-y-6">
+                {/* PDPA Retention & Backup */}
+                <div className="bg-white rounded-xl p-6 border border-slate-200 space-y-5">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <span className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <HardDrive className="w-4 h-4 text-slate-700" />
+                      <span>นโยบาย PDPA และการสำรองข้อมูล</span>
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      เก็บข้อมูลดิบ {sysSettings.retention_days ?? 90} วัน
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="text-[10px] text-slate-400 font-semibold block">ฐานข้อมูลหลัก (Primary DB)</span>
+                      <p className="font-bold text-slate-900">{backupInfo?.primary_database || 'PostgreSQL + pgvector'}</p>
+                    </div>
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="text-[10px] text-slate-400 font-semibold block">กราฟความสัมพันธ์ (Graph DB)</span>
+                      <p className="font-bold text-slate-900">{backupInfo?.graph_database || 'Neo4j Community'}</p>
+                    </div>
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="text-[10px] text-slate-400 font-semibold block">การสำรองข้อมูล</span>
+                      <p className="font-bold text-slate-900">{backupInfo?.backup_destination || 'Garage S3 / Cloudflare R2'}</p>
+                    </div>
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="text-[10px] text-slate-400 font-semibold block">โหมดการทำงาน & AI Model</span>
+                      <p className="font-bold text-slate-900">{sysRuntime.app_env || 'production'} / {sysRuntime.litellm_model || 'gemma-4-31b-it'}</p>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSaveSettings} className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="space-y-1.5 flex-1">
+                      <label className="block text-xs font-semibold text-slate-800">จำนวนวันเก็บข้อความดิบก่อนลบอัตโนมัติ (PDPA Retention Days)</label>
+                      <input
+                        type="number"
+                        min="7"
+                        max="3650"
+                        value={sysSettings.retention_days ?? 90}
+                        onChange={(e) => setSysSettings({ ...sysSettings, retention_days: Number(e.target.value) })}
+                        className="w-40 px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="submit"
+                        disabled={savingSettings}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 transition"
+                      >
+                        บันทึกจำนวนวัน
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRunRetentionCleanup}
+                        disabled={retentionCleaning}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{retentionCleaning ? 'กำลังล้างข้อมูล...' : 'รัน PDPA Retention Cleanup'}</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {retentionMsg && (
+                    <div className="p-3 rounded-lg bg-emerald-50 text-xs font-semibold text-emerald-800 border border-emerald-200">
+                      {retentionMsg}
+                    </div>
+                  )}
+                </div>
+
+                {/* User Management (Authentik Role Groups) */}
+                <div className="bg-white rounded-xl p-6 border border-slate-200 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">การจัดการผู้ใช้งานและสิทธิ์ (Authentik SSO)</h3>
+                      <p className="text-xs text-slate-500">บัญชีผู้ใช้, 2FA และกลุ่มสิทธิ์ถูกจัดการจากศูนย์กลาง Authentik</p>
+                    </div>
+                    <a
+                      href={sysRuntime.auth_console_url || 'https://auth.addpay.in.th/if/admin/'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition inline-flex items-center gap-1.5 shrink-0"
+                    >
+                      <span>เปิด Authentik Admin Console</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="font-bold text-slate-900 block">socialeye-viewers → Viewer</span>
+                      <p className="text-[11px] text-slate-500">ดู Dashboard, แผนที่ 77 จังหวัด, ประเด็นร้อน, รายงานที่เผยแพร่แล้ว, ถาม-ตอบ, Export CSV</p>
+                    </div>
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="font-bold text-slate-900 block">socialeye-analysts → Analyst</span>
+                      <p className="text-[11px] text-slate-500">สิทธิ์ Viewer + ติดป้าย Quality Center, จัดการ Golden Set, ร่างและอนุมัติเผยแพร่รายงาน</p>
+                    </div>
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                      <span className="font-bold text-slate-900 block">socialeye-admins → Admin</span>
+                      <p className="text-[11px] text-slate-500">สิทธิ์ Analyst + ตั้งค่าระบบ, แหล่งข้อมูล, การแจ้งเตือน, สั่งดึงข้อมูล และ PDPA Retention</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -3255,14 +3730,27 @@ export default function App() {
             )}
 
             {isAdmin && (
-              <button
-                onClick={() => { triggerIngest(); setMobileMenuOpen(false); }}
-                disabled={ingesting}
-                className="w-full py-3.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition"
-              >
-                <RefreshCw className={`w-4 h-4 ${ingesting ? 'animate-spin' : ''}`} />
-                <span>{ingesting ? 'กำลังดึงข่าวในพื้นหลัง...' : 'ซิงค์ดึงข่าวและวิเคราะห์ทันที'}</span>
-              </button>
+              <>
+                <button
+                  onClick={() => { setActiveMainTab('settings'); setMobileMenuOpen(false); }}
+                  className={`w-full py-3 px-4 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
+                    activeMainTab === 'settings'
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-slate-50 text-slate-800 border-slate-200'
+                  }`}
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>ตั้งค่าระบบ (Admin Settings)</span>
+                </button>
+                <button
+                  onClick={() => { triggerIngest(); setMobileMenuOpen(false); }}
+                  disabled={ingesting}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition"
+                >
+                  <RefreshCw className={`w-4 h-4 ${ingesting ? 'animate-spin' : ''}`} />
+                  <span>{ingesting ? 'กำลังดึงข่าวในพื้นหลัง...' : 'ซิงค์ดึงข่าวและวิเคราะห์ทันที'}</span>
+                </button>
+              </>
             )}
           </div>
         </div>

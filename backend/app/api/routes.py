@@ -7,9 +7,16 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db, AsyncSessionLocal
-from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample, PolicyReport
+from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample, PolicyReport, DataSource
 from app.analyzer.aggregator import DIMENSIONS
 from app.ingest.rss import run_ingestion_pipeline
+from app.ingest.scheduler import reschedule_ingest_job
+from app.settings_service import (
+    get_all_settings,
+    get_setting_value,
+    update_settings,
+    send_test_notification,
+)
 from app.analyzer.benchmark import compute_benchmark_metrics
 from app.data.seed_data import seed_golden_dataset
 from app.analyzer.few_shot import get_embedding
@@ -751,6 +758,145 @@ async def trigger_retention_cleanup(
     session: AsyncSession = Depends(get_db),
     _: UserContext = Depends(require_admin),
 ):
-    """Runs PDPA 90-day retention cleanup on raw data."""
-    res = await clean_expired_content(session, retention_days=90)
+    """Runs PDPA retention cleanup on raw data using configured retention_days."""
+    days = int(await get_setting_value(session, "retention_days", 90))
+    res = await clean_expired_content(session, retention_days=days)
     return res
+
+@router.get("/admin/settings")
+async def get_admin_settings(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Returns system settings (with secrets masked) and read-only runtime info."""
+    data = await get_all_settings(session, mask_secrets=True)
+    data["runtime"] = {
+        "app_env": settings.APP_ENV,
+        "auth_enabled": settings.is_auth_enforced,
+        "oidc_issuer": settings.OIDC_ISSUER,
+        "oidc_client_id": settings.OIDC_CLIENT_ID,
+        "litellm_model": settings.LITELLM_MODEL,
+        "embedding_model": settings.LITELLM_EMBEDDING_MODEL,
+        "auth_console_url": "https://auth.addpay.in.th/if/admin/",
+    }
+    return data
+
+@router.put("/admin/settings")
+async def update_admin_settings(
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_admin),
+):
+    """Updates system settings with Audit Trail and reschedules background ingest if interval changed."""
+    updates = payload.get("settings") if isinstance(payload.get("settings"), dict) else payload
+    result = await update_settings(session, updates, updated_by=user.display_identity)
+    if "ingest_interval_minutes" in updates:
+        try:
+            reschedule_ingest_job(int(updates["ingest_interval_minutes"]))
+        except Exception:
+            pass
+    return {"status": "success", "message": "บันทึกการตั้งค่าระบบเรียบร้อย", **result}
+
+@router.post("/admin/alerts/test")
+async def test_alert_channel(
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Sends a test alert via LINE OA or Email SMTP."""
+    channel = payload.get("channel", "line")
+    return await send_test_notification(session, channel=channel)
+
+@router.get("/admin/sources")
+async def list_data_sources(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Lists all configured RSS and Google News data sources."""
+    rows = (await session.execute(select(DataSource).order_by(DataSource.id.asc()))).scalars().all()
+    return {
+        "sources": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "source_type": s.source_type,
+                "url": s.url,
+                "keywords": s.keywords or [],
+                "is_enabled": s.is_enabled,
+                "updated_by": s.updated_by,
+                "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+            }
+            for s in rows
+        ]
+    }
+
+@router.post("/admin/sources")
+async def create_data_source(
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_admin),
+):
+    """Adds a new RSS or Google News data source."""
+    name = (payload.get("name") or "").strip()
+    url = (payload.get("url") or "").strip()
+    if not name or not url:
+        raise HTTPException(status_code=400, detail="กรุณาระบุชื่อแหล่งข้อมูลและ URL")
+
+    raw_kw = payload.get("keywords") or []
+    if isinstance(raw_kw, str):
+        raw_kw = [k.strip() for k in raw_kw.split(",") if k.strip()]
+
+    src = DataSource(
+        name=name,
+        source_type=payload.get("source_type") or ("google_news" if "news.google.com" in url else "rss"),
+        url=url,
+        keywords=raw_kw,
+        is_enabled=bool(payload.get("is_enabled", True)),
+        created_by=user.display_identity,
+        updated_by=user.display_identity,
+    )
+    session.add(src)
+    await session.commit()
+    await session.refresh(src)
+    return {"status": "success", "id": src.id, "message": "เพิ่มแหล่งข้อมูลเรียบร้อย"}
+
+@router.patch("/admin/sources/{source_id}")
+async def update_data_source(
+    source_id: int,
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_admin),
+):
+    """Updates or toggles a configured data source."""
+    src = await session.get(DataSource, source_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    if "name" in payload:
+        src.name = str(payload["name"]).strip()
+    if "url" in payload:
+        src.url = str(payload["url"]).strip()
+    if "is_enabled" in payload:
+        src.is_enabled = bool(payload["is_enabled"])
+    if "keywords" in payload:
+        raw_kw = payload["keywords"]
+        if isinstance(raw_kw, str):
+            raw_kw = [k.strip() for k in raw_kw.split(",") if k.strip()]
+        src.keywords = raw_kw
+    src.updated_by = user.display_identity
+    await session.commit()
+    return {"status": "success", "message": "อัปเดตแหล่งข้อมูลเรียบร้อย"}
+
+@router.delete("/admin/sources/{source_id}")
+async def delete_data_source(
+    source_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Deletes a data source."""
+    src = await session.get(DataSource, source_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="Data source not found")
+    await session.delete(src)
+    await session.commit()
+    return {"status": "success", "message": "ลบแหล่งข้อมูลเรียบร้อย"}

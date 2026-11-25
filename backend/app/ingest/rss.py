@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import Content, Evaluation
+from app.db.models import Content, Evaluation, DataSource
 from app.analyzer.scoring import evaluate_content_with_llm
 from app.analyzer.aggregator import calculate_daily_indices
 from app.analyzer.alerts import check_for_alerts
@@ -59,15 +59,26 @@ RSS_FEEDS = [
 ]
 
 async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int = 5) -> Dict[str, Any]:
-    """Fetches latest RSS news, saves new content, evaluates with LLM, and recalculates indices."""
+    """Fetches latest RSS news from enabled DataSource records, evaluates with LLM, and recalculates indices."""
     new_contents_count = 0
     evaluated_count = 0
     headers_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    for feed_info in RSS_FEEDS:
+    db_sources = (await session.execute(select(DataSource).where(DataSource.is_enabled == True))).scalars().all()
+    if db_sources:
+        feeds_to_run = [
+            {"source": s.name, "url": s.url, "keywords": s.keywords or []}
+            for s in db_sources
+            if s.source_type in ("rss", "google_news")
+        ]
+    else:
+        feeds_to_run = [{"source": f["source"], "url": f["url"], "keywords": []} for f in RSS_FEEDS]
+
+    for feed_info in feeds_to_run:
         try:
             feed = feedparser.parse(feed_info["url"], agent=headers_agent)
             items = feed.entries[:max_items_per_feed]
+            kw_list = [str(k).strip().lower() for k in (feed_info.get("keywords") or []) if str(k).strip()]
             
             for item in items:
                 link = getattr(item, "link", None)
@@ -76,6 +87,11 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                 
                 if not link or not title:
                     continue
+
+                if kw_list:
+                    combined = f"{title} {summary}".lower()
+                    if not any(kw in combined for kw in kw_list):
+                        continue
 
                 # Check if already exists
                 stmt = select(Content).where(Content.url == link)

@@ -124,3 +124,29 @@ class PolicyReport(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, index=True, nullable=False)
+    value = Column(JSON, nullable=True)
+    is_secret = Column(Boolean, default=False)
+    updated_by = Column(String(200), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DataSource(Base):
+    __tablename__ = "data_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    source_type = Column(String(50), default="rss", index=True) # rss | google_news
+    url = Column(String(1024), nullable=False)
+    keywords = Column(JSON, default=list)
+    is_enabled = Column(Boolean, default=True, index=True)
+    created_by = Column(String(200), nullable=True)
+    updated_by = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

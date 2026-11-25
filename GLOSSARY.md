@@ -21,3 +21,17 @@ _Avoid_: Superuser, Operator
 **Role Group**:
 An Authentik group claim (`socialeye-admins`, `socialeye-analysts`, or `socialeye-viewers`) mapped directly to a canonical SocialEye role; authenticated users outside these three groups are denied access.
 _Avoid_: Permission Role, Access Tier
+
+### System Configuration
+
+**Data Source**:
+A configured external feed or connector (such as an RSS feed, Google News query, YouTube channel, Pantip board, or Wisesight import) that supplies media content for moral evaluation.
+_Avoid_: Feed, Scraper, Channel
+
+**Alert Rule**:
+A configurable threshold and cooldown policy (such as 24-hour index shift or severe polarity trigger) that determines when anomaly notifications are raised and dispatched.
+_Avoid_: Notification Trigger, Threshold
+
+**Retention Policy**:
+The configurable number of days raw media content and embeddings are retained before automated PDPA purge, while preserving aggregated daily indices and published reports.
+_Avoid_: Cleanup Job, Expiry Setting
