@@ -48,15 +48,18 @@ async def evaluate_content_with_llm(title: str, text: str, session: Optional[Asy
         except Exception as e:
             print(f"[Scoring] Few-shot retrieval notice: {e}")
 
+from app.settings_service import get_llm_config
+
+    llm_cfg = await get_llm_config(session)
     prompt = f"{few_shot_block}\nหัวข้อข่าวที่จะประเมิน: {title}\n\nเนื้อหา:\n{text[:1500]}"
     
     headers = {
-        "Authorization": f"Bearer {settings.LITELLM_API_KEY}",
+        "Authorization": f"Bearer {llm_cfg['api_key']}",
         "Content-Type": "application/json; charset=utf-8"
     }
     
     body = {
-        "model": settings.LITELLM_MODEL,
+        "model": llm_cfg["model"],
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
@@ -65,7 +68,7 @@ async def evaluate_content_with_llm(title: str, text: str, session: Optional[Asy
         "max_tokens": 800
     }
 
-    url = f"{settings.LITELLM_ENDPOINT.rstrip('/')}/chat/completions"
+    url = f"{llm_cfg['endpoint']}/chat/completions"
 
     async with httpx.AsyncClient(timeout=45.0) as client:
         try:

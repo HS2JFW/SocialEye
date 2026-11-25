@@ -16,6 +16,8 @@ from app.settings_service import (
     get_setting_value,
     update_settings,
     send_test_notification,
+    get_llm_config,
+    test_llm_connection,
 )
 from app.analyzer.benchmark import compute_benchmark_metrics
 from app.data.seed_data import seed_golden_dataset
@@ -770,13 +772,14 @@ async def get_admin_settings(
 ):
     """Returns system settings (with secrets masked) and read-only runtime info."""
     data = await get_all_settings(session, mask_secrets=True)
+    llm_cfg = await get_llm_config(session)
     data["runtime"] = {
         "app_env": settings.APP_ENV,
         "auth_enabled": settings.is_auth_enforced,
         "oidc_issuer": settings.OIDC_ISSUER,
         "oidc_client_id": settings.OIDC_CLIENT_ID,
-        "litellm_model": settings.LITELLM_MODEL,
-        "embedding_model": settings.LITELLM_EMBEDDING_MODEL,
+        "litellm_model": llm_cfg["model"],
+        "embedding_model": llm_cfg["embedding_model"],
         "auth_console_url": "https://auth.addpay.in.th/if/admin/",
     }
     return data
@@ -806,6 +809,14 @@ async def test_alert_channel(
     """Sends a test alert via LINE OA or Email SMTP."""
     channel = payload.get("channel", "line")
     return await send_test_notification(session, channel=channel)
+
+@router.post("/admin/llm/test")
+async def test_llm_gateway(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Tests connection to the configured LLM Endpoint and lists available models."""
+    return await test_llm_connection(session)
 
 @router.get("/admin/sources")
 async def list_data_sources(

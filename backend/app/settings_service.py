@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as env_settings
 from app.db.models import DataSource, SystemSetting
+from app.db.session import AsyncSessionLocal
 from app.ingest.rss import RSS_FEEDS
 
 SECRET_MASK = "••••••••"
@@ -17,6 +18,10 @@ DEFAULT_SETTINGS: Dict[str, Dict[str, Any]] = {
     "ingest_interval_minutes": {"value": env_settings.INGEST_INTERVAL_MINUTES, "is_secret": False},
     "max_items_per_feed": {"value": env_settings.MAX_ITEMS_PER_FEED, "is_secret": False},
     "daily_budget_thb": {"value": env_settings.DAILY_BUDGET_THB, "is_secret": False},
+    "llm_endpoint": {"value": env_settings.LITELLM_ENDPOINT, "is_secret": False},
+    "llm_api_key": {"value": env_settings.LITELLM_API_KEY, "is_secret": True},
+    "llm_model": {"value": env_settings.LITELLM_MODEL, "is_secret": False},
+    "llm_embedding_model": {"value": env_settings.LITELLM_EMBEDDING_MODEL, "is_secret": False},
     "alert_shift_threshold": {"value": 0.30, "is_secret": False},
     "alert_cooldown_hours": {"value": 24, "is_secret": False},
     "alert_email_enabled": {"value": False, "is_secret": False},
@@ -186,3 +191,59 @@ async def send_test_notification(session: AsyncSession, channel: str) -> Dict[st
             return {"status": "error", "message": f"ส่งอีเมลไม่สำเร็จ: {exc}"}
 
     return {"status": "error", "message": f"ไม่รองรับช่องทาง: {channel}"}
+
+
+async def get_llm_config(session: AsyncSession | None = None) -> Dict[str, str]:
+    """Resolves live LLM Endpoint, API Key, Chat Model, and Embedding Model from DB with .env fallback."""
+    async def _load(s: AsyncSession) -> Dict[str, str]:
+        raw = await get_all_settings(s, mask_secrets=False)
+        cfg = raw["settings"]
+        return {
+            "endpoint": (cfg.get("llm_endpoint") or env_settings.LITELLM_ENDPOINT).rstrip("/"),
+            "api_key": str(cfg.get("llm_api_key") or env_settings.LITELLM_API_KEY),
+            "model": str(cfg.get("llm_model") or env_settings.LITELLM_MODEL),
+            "embedding_model": str(cfg.get("llm_embedding_model") or env_settings.LITELLM_EMBEDDING_MODEL),
+        }
+
+    try:
+        if session is not None:
+            return await _load(session)
+        async with AsyncSessionLocal() as own_session:
+            return await _load(own_session)
+    except Exception:
+        return {
+            "endpoint": env_settings.LITELLM_ENDPOINT.rstrip("/"),
+            "api_key": env_settings.LITELLM_API_KEY,
+            "model": env_settings.LITELLM_MODEL,
+            "embedding_model": env_settings.LITELLM_EMBEDDING_MODEL,
+        }
+
+
+async def test_llm_connection(session: AsyncSession) -> Dict[str, Any]:
+    """Tests connectivity to the configured LLM Endpoint and lists available models."""
+    cfg = await get_llm_config(session)
+    endpoint = cfg["endpoint"]
+    api_key = cfg["api_key"]
+
+    if not endpoint:
+        return {"status": "error", "message": "กรุณาระบุ API Endpoint URL", "models": []}
+
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.get(f"{endpoint}/models", headers=headers)
+        if res.status_code >= 400:
+            return {
+                "status": "error",
+                "message": f"Gateway ตอบกลับสถานะ {res.status_code}: {res.text[:200]}",
+                "models": [],
+            }
+        data = res.json()
+        models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+        return {
+            "status": "success",
+            "message": f"เชื่อมต่อ {endpoint} สำเร็จ (พบ {len(models)} โมเดล)",
+            "models": models,
+        }
+    except Exception as exc:
+        return {"status": "error", "message": f"ไม่สามารถเชื่อมต่อ Gateway ได้: {exc}", "models": []}

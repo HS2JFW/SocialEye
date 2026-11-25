@@ -152,13 +152,15 @@ async def generate_policy_report(
     regional_highlights = f"จังหวัดที่มีการรายงานข่าวสูงสุดได้แก่ กรุงเทพมหานคร และหัวเมืองภูมิภาค คิดเป็น {len(province_counts)} จังหวัดที่มีข้อมูลปรากฏในรอบการประเมินนี้"
 
     try:
+        from app.settings_service import get_llm_config
+        llm_cfg = await get_llm_config(session)
         async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=15.0)) as client:
             headers = {
-                "Authorization": f"Bearer {settings.LITELLM_API_KEY}",
+                "Authorization": f"Bearer {llm_cfg['api_key']}",
                 "Content-Type": "application/json"
             }
             body = {
-                "model": settings.LITELLM_MODEL,
+                "model": llm_cfg["model"],
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt_context}
@@ -166,7 +168,7 @@ async def generate_policy_report(
                 "temperature": 0.3,
                 "max_tokens": 1200
             }
-            res = await client.post(f"{settings.LITELLM_ENDPOINT}/chat/completions", json=body, headers=headers)
+            res = await client.post(f"{llm_cfg['endpoint']}/chat/completions", json=body, headers=headers)
             if res.status_code == 200:
                 resp_json = res.json()
                 raw_reply = resp_json["choices"][0]["message"]["content"].strip()

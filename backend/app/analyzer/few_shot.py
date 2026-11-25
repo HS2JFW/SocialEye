@@ -5,19 +5,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import GoldenSample
+from app.settings_service import get_llm_config
 
 async def get_embedding(text: str) -> Optional[List[float]]:
     """Fetches text vector embedding via LiteLLM Gateway."""
     if not text or not text.strip():
         return None
         
-    url = f"{settings.LITELLM_ENDPOINT.rstrip('/')}/embeddings"
+    llm_cfg = await get_llm_config()
+    url = f"{llm_cfg['endpoint']}/embeddings"
     headers = {
-        "Authorization": f"Bearer {settings.LITELLM_API_KEY}",
+        "Authorization": f"Bearer {llm_cfg['api_key']}",
         "Content-Type": "application/json; charset=utf-8"
     }
     body = {
-        "model": settings.LITELLM_EMBEDDING_MODEL,
+        "model": llm_cfg["embedding_model"],
         "input": text[:1000]
     }
     

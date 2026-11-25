@@ -136,6 +136,8 @@ export default function App() {
   const [settingsMsg, setSettingsMsg] = useState('');
   const [testingChannel, setTestingChannel] = useState('');
   const [testAlertMsg, setTestAlertMsg] = useState('');
+  const [testingLlm, setTestingLlm] = useState(false);
+  const [testLlmResult, setTestLlmResult] = useState(null);
   const [newSourceName, setNewSourceName] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceKeywords, setNewSourceKeywords] = useState('');
@@ -200,6 +202,20 @@ export default function App() {
       setTestAlertMsg('เกิดข้อผิดพลาดในการทดสอบแจ้งเตือน');
     } finally {
       setTestingChannel('');
+    }
+  };
+
+  const handleTestLlm = async () => {
+    try {
+      setTestingLlm(true);
+      setTestLlmResult(null);
+      const res = await authFetch('/api/admin/llm/test', { method: 'POST' });
+      const data = await res.json();
+      setTestLlmResult(data);
+    } catch {
+      setTestLlmResult({ status: 'error', message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ Gateway', models: [] });
+    } finally {
+      setTestingLlm(false);
     }
   };
 
@@ -1008,7 +1024,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
+      <main className={`${activeMainTab === 'settings' ? 'max-w-5xl mr-auto' : 'max-w-7xl mx-auto'} w-full px-4 sm:px-6 lg:px-8 pt-6 space-y-6`}>
 
         {/* =========================================================================
             TAB 1: EXECUTIVE INTELLIGENCE DASHBOARD
@@ -2722,18 +2738,19 @@ export default function App() {
             TAB 7: SYSTEM SETTINGS (ADMIN ONLY)
         ========================================================================= */}
         {activeMainTab === 'settings' && isAdmin && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-6 animate-fade-in text-left">
             {/* Settings Subtabs */}
-            <div className="bg-white rounded-xl p-2 border border-slate-200 flex flex-wrap gap-1.5">
+            <div className="bg-white rounded-xl p-2 border border-slate-200 flex flex-wrap justify-start gap-1.5">
               {[
                 { id: 'sources', label: 'แหล่งข้อมูลและคำค้น' },
+                { id: 'ai', label: 'โมเดล AI & API' },
                 { id: 'ingestion', label: 'การดึงข้อมูลและงบ AI' },
                 { id: 'alerts', label: 'การแจ้งเตือนและช่องทาง' },
                 { id: 'system', label: 'PDPA ผู้ใช้ และระบบ' },
               ].map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => { setActiveSettingsTab(t.id); setSettingsMsg(''); setTestAlertMsg(''); }}
+                  onClick={() => { setActiveSettingsTab(t.id); setSettingsMsg(''); setTestAlertMsg(''); setTestLlmResult(null); }}
                   className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
                     activeSettingsTab === t.id
                       ? 'bg-slate-900 text-white'
@@ -2948,7 +2965,117 @@ export default function App() {
               </div>
             )}
 
-            {/* SUBTAB 2: INGESTION & LLM BUDGET */}
+            {/* SUBTAB 2: AI MODEL & API PROVIDER */}
+            {activeSettingsTab === 'ai' && (
+              <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-5 text-left">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-bold text-slate-900">การตั้งค่า AI Model และ API Gateway (OpenAI / LiteLLM Compatible)</h3>
+                  <p className="text-xs text-slate-500">ปรับเปลี่ยน Endpoint, API Key และชื่อโมเดล มีผลทันทีกับระบบให้คะแนน, ถาม-ตอบ และร่างรายงานโดยไม่ต้อง Restart</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">API Endpoint URL</label>
+                    <input
+                      type="url"
+                      value={sysSettings.llm_endpoint ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, llm_endpoint: e.target.value })}
+                      placeholder="https://llm.addpay.in.th/v1"
+                      required
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">API Key (Secret)</label>
+                    <input
+                      type="password"
+                      value={sysSettings.llm_api_key ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, llm_api_key: e.target.value })}
+                      placeholder="sk-..."
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <span className="text-[11px] text-slate-400 block">ค่าเดิมจะแสดงเป็น •••••••• (เว้นไว้หากไม่ต้องการเปลี่ยน)</span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">Chat / Scoring Model</label>
+                    <input
+                      type="text"
+                      value={sysSettings.llm_model ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, llm_model: e.target.value })}
+                      placeholder="gemma-4-31b-it"
+                      required
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">Embedding Model</label>
+                    <input
+                      type="text"
+                      value={sysSettings.llm_embedding_model ?? ''}
+                      onChange={(e) => setSysSettings({ ...sysSettings, llm_embedding_model: e.target.value })}
+                      placeholder="embeded"
+                      required
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {testLlmResult && (
+                  <div className={`p-3.5 rounded-lg border text-xs space-y-2 ${
+                    testLlmResult.status === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      : 'bg-rose-50 border-rose-200 text-rose-900'
+                  }`}>
+                    <p className="font-semibold">{testLlmResult.message}</p>
+                    {testLlmResult.models && testLlmResult.models.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-[11px] text-slate-600 block">คลิกเลือกโมเดลเพื่อใส่ในช่อง Chat / Scoring Model:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {testLlmResult.models.map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setSysSettings({ ...sysSettings, llm_model: m })}
+                              className="px-2.5 py-1 rounded-md bg-white border border-slate-200 hover:border-slate-900 text-[11px] font-semibold text-slate-800 transition"
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-3 flex flex-wrap items-center justify-start gap-2.5 border-t border-slate-100">
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition"
+                  >
+                    {savingSettings ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า AI'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTestLlm}
+                    disabled={testingLlm}
+                    className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-semibold transition"
+                  >
+                    {testingLlm ? 'กำลังทดสอบ...' : 'ทดสอบการเชื่อมต่อ & ดึงรายชื่อโมเดล'}
+                  </button>
+                  {sysMeta.llm_model?.updated_by && (
+                    <span className="text-[11px] text-slate-400">
+                      แก้ไขล่าสุดโดย: {sysMeta.llm_model.updated_by}
+                    </span>
+                  )}
+                </div>
+              </form>
+            )}
+
+            {/* SUBTAB 3: INGESTION & LLM BUDGET */}
             {activeSettingsTab === 'ingestion' && (
               <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-5">
                 <div className="border-b border-slate-100 pb-3">
@@ -2994,10 +3121,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-                  <span className="text-[11px] text-slate-400">
-                    {sysMeta.ingest_interval_minutes?.updated_by ? `แก้ไขล่าสุดโดย: ${sysMeta.ingest_interval_minutes.updated_by}` : ''}
-                  </span>
+                <div className="pt-3 flex flex-wrap items-center justify-start gap-3 border-t border-slate-100">
                   <button
                     type="submit"
                     disabled={savingSettings}
@@ -3005,6 +3129,11 @@ export default function App() {
                   >
                     {savingSettings ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
                   </button>
+                  {sysMeta.ingest_interval_minutes?.updated_by && (
+                    <span className="text-[11px] text-slate-400">
+                      แก้ไขล่าสุดโดย: {sysMeta.ingest_interval_minutes.updated_by}
+                    </span>
+                  )}
                 </div>
               </form>
             )}
@@ -3148,7 +3277,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-start pt-2 border-t border-slate-100">
                   <button
                     type="submit"
                     disabled={savingSettings}
