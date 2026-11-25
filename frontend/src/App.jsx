@@ -7,7 +7,7 @@ import {
   Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
   Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame,
   Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive, MoreHorizontal,
-  LogIn, LogOut, Lock
+  LogIn, LogOut, Lock, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import ThailandSvgMap from './components/ThailandSvgMap';
 import {
@@ -46,8 +46,9 @@ export default function App() {
   const isAnalyst = currentUser?.role === 'analyst' || currentUser?.role === 'admin';
   const isAdmin = currentUser?.role === 'admin';
 
-  // Navigation Tabs: 'dashboard' | 'map' | 'clusters' | 'chat' | 'quality'
+  // Navigation Tabs: 'dashboard' | 'map' | 'clusters' | 'chat' | 'quality' | 'reports'
   const [activeMainTab, setActiveMainTab] = useState('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeQualitySubtab, setActiveQualitySubtab] = useState('benchmark');
 
   // Dashboard Data
@@ -619,32 +620,32 @@ export default function App() {
 
   if (!authReady) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg mb-4 animate-pulse">
-          <Eye className="w-6 h-6" />
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-11 h-11 rounded-lg bg-slate-900 flex items-center justify-center text-white mb-4 animate-pulse">
+          <Eye className="w-5 h-5" />
         </div>
-        <p className="text-sm font-bold text-slate-700">กำลังตรวจสอบสิทธิ์การเข้าใช้งาน SocialEye...</p>
+        <p className="text-sm font-semibold text-slate-700">กำลังตรวจสอบสิทธิ์การเข้าใช้งาน SocialEye...</p>
       </div>
     );
   }
 
   if (authEnabled && !currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50/50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/80 shadow-xl space-y-6 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 mx-auto">
-            <Lock className="w-8 h-8" />
+      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-xl p-8 border border-slate-200 shadow-sm space-y-6 text-center">
+          <div className="w-12 h-12 rounded-lg bg-slate-900 flex items-center justify-center text-white mx-auto">
+            <Lock className="w-6 h-6" />
           </div>
-          <div className="space-y-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">SocialEye</h1>
-            <p className="text-xs font-semibold text-slate-500">
-              ระบบ AI Agent เฝ้าระวังสื่อและโซเชียลมีเดีย ต่อดัชนีคุณธรรม 5 ด้าน
+          <div className="space-y-1.5">
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">SocialEye</h1>
+            <p className="text-xs text-slate-500">
+              ระบบติดตามและวิเคราะห์ดัชนีคุณธรรม 5 ด้านจากสื่อออนไลน์
             </p>
           </div>
 
           {authError ? (
-            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-3 text-left">
-              <div className="flex items-center gap-2 font-black text-rose-900">
+            <div className="p-4 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-3 text-left">
+              <div className="flex items-center gap-2 font-bold text-rose-900">
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>ไม่สามารถเข้าถึงระบบได้</span>
               </div>
@@ -652,13 +653,13 @@ export default function App() {
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => { setAuthError(''); startLogin(); }}
-                  className="flex-1 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition"
+                  className="flex-1 py-2.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition"
                 >
                   เข้าสู่ระบบใหม่
                 </button>
                 <button
                   onClick={logout}
-                  className="py-2.5 px-3 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold text-xs transition"
+                  className="py-2.5 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs transition"
                 >
                   ออกจากระบบ
                 </button>
@@ -666,12 +667,12 @@ export default function App() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-[11px] text-slate-600 leading-relaxed">
-                กรุณายืนยันตัวตนผ่านระบบกลาง <strong className="text-slate-800">Authentik SSO (2FA)</strong> เพื่อเข้าใช้งานตามสิทธิ์ (Admin / Analyst / Viewer)
+              <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
+                กรุณายืนยันตัวตนผ่านระบบกลาง <strong className="text-slate-900">Authentik SSO (2FA)</strong> เพื่อเข้าใช้งานตามสิทธิ์ที่ได้รับ
               </div>
               <button
                 onClick={startLogin}
-                className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white font-bold text-sm shadow-md shadow-blue-500/20 transition flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white font-semibold text-sm transition flex items-center justify-center gap-2"
               >
                 <LogIn className="w-4 h-4" />
                 <span>เข้าสู่ระบบด้วย Authentik SSO</span>
@@ -679,144 +680,130 @@ export default function App() {
             </div>
           )}
 
-          <p className="text-[10px] text-slate-400">
-            ดัชนีสะท้อนจากสื่อออนไลน์ • Protected by OIDC PKCE & 2FA
+          <p className="text-[11px] text-slate-400">
+            ดัชนีสะท้อนจากสื่อออนไลน์ • OIDC PKCE & 2FA
           </p>
         </div>
       </div>
     );
   }
 
+  const navGroups = [
+    {
+      title: 'ติดตามสถานการณ์',
+      items: [
+        { id: 'dashboard', label: 'ภาพรวมดัชนี', desc: 'สถิติและแนวโน้มดัชนีคุณธรรม 5 ด้าน', icon: Activity },
+        { id: 'map', label: 'แผนที่ 77 จังหวัด', desc: 'การกระจายตัวของดัชนีรายจังหวัด', icon: Map },
+        { id: 'clusters', label: 'ประเด็นร้อน', desc: 'กลุ่มประเด็นสำคัญจากสื่อออนไลน์', icon: Flame },
+        { id: 'chat', label: 'ถาม-ตอบข้อมูล', desc: 'สืบค้นและวิเคราะห์ข้อมูลเชิงลึก', icon: MessageSquare },
+      ]
+    },
+    {
+      title: 'ตรวจสอบและรายงาน',
+      items: [
+        { id: 'quality', label: 'ศูนย์วัดคุณภาพ', desc: 'ตรวจสอบความแม่นยำและชุดข้อมูลทองคำ', icon: Award },
+        { id: 'reports', label: 'รายงานและข้อมูล', desc: 'รายงานเชิงนโยบายและส่งออกข้อมูล', icon: FileText },
+      ]
+    }
+  ];
+
+  const activeNavMeta = navGroups.flatMap(g => g.items).find(i => i.id === activeMainTab) || navGroups[0].items[0];
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-24 md:pb-16">
-      
-      {/* Top Header */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200/80 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
-              <Eye className="w-5 h-5" />
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex">
+
+      {/* Desktop Collapsible Left Sidebar */}
+      <aside className={`hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-200 z-30 ${sidebarCollapsed ? 'w-[68px]' : 'w-60'}`}>
+        {/* Sidebar Header / Brand */}
+        <div className="h-16 px-3.5 border-b border-slate-200 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shrink-0">
+              <Eye className="w-4 h-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900">SocialEye</h1>
-                <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-purple-100 text-purple-700 uppercase tracking-wider">
-                  Mobile & Web
-                </span>
+            {!sidebarCollapsed && (
+              <div className="min-w-0">
+                <span className="text-sm font-bold tracking-tight text-slate-900 block truncate">SocialEye</span>
+                <span className="text-[10px] text-slate-400 block truncate">ดัชนีคุณธรรม 5 ด้าน</span>
               </div>
-              <p className="text-[11px] text-slate-500 hidden sm:block">
-                ระบบ AI Agent เฝ้าระวังสื่อและโซเชียลมีเดีย ต่อดัชนีคุณธรรม 5 ด้าน (ระดับประเทศ & 77 จังหวัด)
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Desktop Main Tabs Navigation */}
-            <div className="hidden md:flex bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-xl">
-              <button
-                onClick={() => setActiveMainTab('dashboard')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  activeMainTab === 'dashboard'
-                    ? 'bg-white text-blue-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                <span>แดชบอร์ดดัชนี</span>
-              </button>
-
-              <button
-                onClick={() => setActiveMainTab('map')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  activeMainTab === 'map'
-                    ? 'bg-white text-rose-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Map className="w-3.5 h-3.5" />
-                <span>แผนที่ 77 จังหวัด</span>
-              </button>
-
-              <button
-                onClick={() => setActiveMainTab('clusters')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  activeMainTab === 'clusters'
-                    ? 'bg-white text-amber-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Flame className="w-3.5 h-3.5" />
-                <span>ประเด็นร้อน</span>
-              </button>
-
-              <button
-                onClick={() => setActiveMainTab('chat')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  activeMainTab === 'chat'
-                    ? 'bg-white text-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Bot className="w-3.5 h-3.5" />
-                <span>AI Chat</span>
-              </button>
-
-              <button
-                onClick={() => setActiveMainTab('quality')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  activeMainTab === 'quality'
-                    ? 'bg-white text-emerald-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Award className="w-3.5 h-3.5" />
-                <span>ศูนย์วัดคุณภาพ</span>
-              </button>
-
-              <button
-                onClick={() => setActiveMainTab('reports')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  activeMainTab === 'reports'
-                    ? 'bg-white text-purple-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>รายงาน & ข้อมูล</span>
-              </button>
-            </div>
-
-            {isAdmin && (
-              <button
-                onClick={triggerIngest}
-                disabled={ingesting}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-xs ${
-                  ingesting 
-                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 active:scale-95 text-white'
-                }`}
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${ingesting ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{ingesting ? 'กำลังดึงข่าว...' : 'ดึงและวิเคราะห์ข่าว'}</span>
-              </button>
             )}
+          </div>
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'ขยายแถบเมนู' : 'ย่อแถบเมนู'}
+            className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition shrink-0"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </button>
+        </div>
 
-            {currentUser && (
-              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
-                <div className="hidden lg:flex flex-col items-end leading-tight">
-                  <span className="text-[11px] font-bold text-slate-800 max-w-[130px] truncate">{currentUser.name}</span>
-                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-black border uppercase ${roleBadge.cls}`}>
-                    {roleBadge.label}
-                  </span>
+        {/* Navigation Groups */}
+        <nav className="flex-1 overflow-y-auto px-2.5 py-4 space-y-5">
+          {navGroups.map((group) => (
+            <div key={group.title} className="space-y-1">
+              {!sidebarCollapsed && (
+                <div className="px-2.5 pb-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  {group.title}
                 </div>
-                <span className={`lg:hidden px-2 py-0.5 rounded-full text-[10px] font-black border uppercase ${roleBadge.cls}`}>
-                  {roleBadge.label}
-                </span>
+              )}
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeMainTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveMainTab(item.id)}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition ${
+                      isActive
+                        ? 'bg-slate-900 text-white font-semibold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
+                    } ${sidebarCollapsed ? 'justify-center' : ''}`}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+                    {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        {/* Sidebar Footer: User Profile & Logout */}
+        {currentUser && (
+          <div className="p-3 border-t border-slate-200 bg-slate-50/70 shrink-0">
+            {sidebarCollapsed ? (
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold" title={`${currentUser.name} (${roleBadge.label})`}>
+                  {(currentUser.name || 'U').charAt(0).toUpperCase()}
+                </div>
                 {authEnabled && (
                   <button
                     onClick={logout}
                     title="ออกจากระบบ"
-                    className="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition"
+                    className="p-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold shrink-0">
+                    {(currentUser.name || 'U').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-900 truncate">{currentUser.name}</div>
+                    <span className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-semibold border ${roleBadge.cls}`}>
+                      {roleBadge.label}
+                    </span>
+                  </div>
+                </div>
+                {authEnabled && (
+                  <button
+                    onClick={logout}
+                    title="ออกจากระบบ"
+                    className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
                   >
                     <LogOut className="w-4 h-4" />
                   </button>
@@ -824,8 +811,64 @@ export default function App() {
               </div>
             )}
           </div>
-        </div>
-      </header>
+        )}
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex-1 min-w-0 flex flex-col pb-24 md:pb-14">
+
+        {/* Clean Top Bar */}
+        <header className="sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-slate-200 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Mobile Brand */}
+            <div className="md:hidden flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shrink-0">
+                <Eye className="w-4 h-4" />
+              </div>
+              <span className="text-sm font-bold text-slate-900">SocialEye</span>
+            </div>
+
+            {/* Desktop Current Section Title */}
+            <div className="hidden md:block min-w-0">
+              <h1 className="text-base font-bold text-slate-900 truncate">{activeNavMeta.label}</h1>
+              <p className="text-xs text-slate-500 truncate">{activeNavMeta.desc}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {isAdmin && (
+              <button
+                onClick={triggerIngest}
+                disabled={ingesting}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
+                  ingesting
+                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white'
+                }`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${ingesting ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{ingesting ? 'กำลังดึงข่าว...' : 'ดึงข้อมูลข่าว'}</span>
+              </button>
+            )}
+
+            {currentUser && (
+              <div className="md:hidden flex items-center gap-1.5">
+                <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${roleBadge.cls}`}>
+                  {roleBadge.label}
+                </span>
+                {authEnabled && (
+                  <button
+                    onClick={logout}
+                    title="ออกจากระบบ"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </header>
 
       {/* Notice Banners */}
       {ingestStatusMsg && (
@@ -1360,7 +1403,7 @@ export default function App() {
           <div className="space-y-6">
             
             {/* Top Bar: Title & Controls */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-black text-slate-900 flex items-center gap-2.5">
@@ -1443,7 +1486,7 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
               {/* Left Column: Interactive Vector Map (7 Cols on LG) */}
-              <div className="lg:col-span-7 xl:col-span-7 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="lg:col-span-7 xl:col-span-7 bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -1490,7 +1533,7 @@ export default function App() {
               <div className="lg:col-span-5 xl:col-span-5 space-y-4">
                 
                 {selectedMapProvince ? (
-                  <div className="bg-white rounded-3xl p-6 border border-indigo-200/80 shadow-md space-y-5 animate-fade-in ring-1 ring-indigo-500/10">
+                  <div className="bg-white rounded-xl p-6 border border-indigo-200/80 shadow-md space-y-5 animate-fade-in ring-1 ring-indigo-500/10">
                     
                     {/* Drawer Header */}
                     <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
@@ -1619,10 +1662,10 @@ export default function App() {
                     <div className="pt-2 border-t border-slate-100">
                       <button
                         onClick={() => handleAskAiProvince(selectedMapProvince)}
-                        className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-[0.98] group cursor-pointer"
+                        className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-[0.98] group cursor-pointer"
                       >
                         <Bot className="w-4 h-4 text-indigo-200 group-hover:rotate-12 transition-transform" />
-                        <span>🤖 สอบถาม AI วิเคราะห์จังหวัดนี้</span>
+                        <span>สอบถามและวิเคราะห์ข้อมูลจังหวัดนี้</span>
                         <ChevronRight className="w-4 h-4 text-indigo-200 group-hover:translate-x-1 transition-transform" />
                       </button>
                     </div>
@@ -1630,8 +1673,8 @@ export default function App() {
                   </div>
                 ) : (
                   /* Empty State: Prompting User to Select a Province */
-                  <div className="bg-white rounded-3xl p-8 border border-slate-200/80 shadow-xs space-y-5 text-center flex flex-col items-center justify-center min-h-[500px]">
-                    <div className="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-xs">
+                  <div className="bg-white rounded-xl p-8 border border-slate-200/80 shadow-xs space-y-5 text-center flex flex-col items-center justify-center min-h-[500px]">
+                    <div className="w-16 h-16 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-xs">
                       <Map className="w-8 h-8 text-indigo-600 animate-bounce" />
                     </div>
 
@@ -1678,7 +1721,7 @@ export default function App() {
             </div>
 
             {/* Regional Summary Metrics Cards */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                 <span className="text-xs font-black text-slate-800">
                   สรุปดัชนีเฉลี่ยจำแนกตาม 6 ภูมิภาค (Regional Moral Summary)
@@ -1714,7 +1757,7 @@ export default function App() {
             </div>
 
             {/* 77 Provinces Grid Overview */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <span className="text-xs font-black text-slate-800">
                   ตารางรายชื่อจังหวัด ({filteredMapProvinces.length} จังหวัด)
@@ -2394,7 +2437,7 @@ export default function App() {
           <div className="space-y-6 animate-fade-in">
             
             {/* Top Bar: Title & Primary Actions */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-black text-slate-900 flex items-center gap-2.5">
@@ -2434,11 +2477,11 @@ export default function App() {
                       className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition ${
                         generatingReport
                           ? 'bg-purple-300 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 active:scale-95'
+                          : 'bg-slate-900 hover:bg-slate-800 active:scale-95'
                       }`}
                     >
                       <Sparkles className={`w-4 h-4 ${generatingReport ? 'animate-spin' : ''}`} />
-                      <span>{generatingReport ? 'AI กำลังประมวลผลร่างรายงาน...' : '✨ สร้างร่างรายงานใหม่'}</span>
+                      <span>{generatingReport ? 'AI กำลังประมวลผลร่างรายงาน...' : 'สร้างร่างรายงาน'}</span>
                     </button>
                   )}
 
@@ -2464,7 +2507,7 @@ export default function App() {
             </div>
 
             {/* Section 1: Generated Policy Reports List */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <span className="text-xs font-black text-slate-800 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-purple-600" />
@@ -2480,7 +2523,7 @@ export default function App() {
                   <FileText className="w-10 h-10 text-slate-300 mx-auto" />
                   <p className="text-xs font-bold text-slate-600">ยังไม่มีรายงานที่ถูกสร้างในระบบ</p>
                   <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
-                    คลิกปุ่ม "✨ สร้างร่างรายงานใหม่" ด้านบน เพื่อให้ AI Policy Advisor สังเคราะห์สถิติดัชนี 5 ด้านและร่างข้อเสนอแนะเชิงนโยบาย
+                    คลิกปุ่ม "สร้างร่างรายงาน" ด้านบน เพื่อให้ AI Policy Advisor สังเคราะห์สถิติดัชนี 5 ด้านและร่างข้อเสนอแนะเชิงนโยบาย
                   </p>
                 </div>
               ) : (
@@ -2555,7 +2598,7 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               
               {/* Connector 1: Wisesight Trend CSV/JSON */}
-              <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="bg-white rounded-xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs">
@@ -2594,7 +2637,7 @@ export default function App() {
               </div>
 
               {/* Connector 2: YouTube News Video Connector */}
-              <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="bg-white rounded-xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
@@ -2629,7 +2672,7 @@ export default function App() {
                     className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${youtubeRunning ? 'animate-spin' : ''}`} />
-                    <span>{youtubeRunning ? 'กำลังดึงคลิป...' : '🎥 ดึงคลิปข่าวล่าสุด'}</span>
+                    <span>{youtubeRunning ? 'กำลังดึงคลิป...' : 'ดึงคลิปข่าวล่าสุด'}</span>
                   </button>
 
                   {youtubeMsg && (
@@ -2641,7 +2684,7 @@ export default function App() {
               </div>
 
               {/* Connector 3: Pantip Community Scanner */}
-              <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="bg-white rounded-xl p-5 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
@@ -2676,7 +2719,7 @@ export default function App() {
                     className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-purple-50 hover:text-purple-700 border border-slate-200 text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${pantipRunning ? 'animate-spin' : ''}`} />
-                    <span>{pantipRunning ? 'กำลังสแกน...' : '💬 ตรวจสอบกระทู้คุณธรรม'}</span>
+                    <span>{pantipRunning ? 'กำลังสแกน...' : 'ตรวจสอบกระทู้คุณธรรม'}</span>
                   </button>
 
                   {pantipMsg && (
@@ -2690,7 +2733,7 @@ export default function App() {
             </div>
 
             {/* Section 3: Data Retention & Backup Storage (Hardening) */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="bg-white rounded-xl p-6 border border-slate-200/80 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <span className="text-xs font-black text-slate-800 flex items-center gap-2">
                   <HardDrive className="w-4 h-4 text-slate-700" />
@@ -2754,11 +2797,12 @@ export default function App() {
         )}
 
       </main>
+      </div>
 
       {/* Review & Labeling Modal (Human-in-the-Loop) */}
       {editingItem && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-4 border border-slate-100 animate-scale-in">
+          <div className="bg-white rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4 border border-slate-100 animate-scale-in">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <Edit3 className="w-5 h-5 text-indigo-600" />
@@ -2869,7 +2913,7 @@ export default function App() {
       {/* Policy Report Review & Details Modal */}
       {selectedReportModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-5 border border-slate-100 my-8 animate-scale-in">
+          <div className="bg-white rounded-xl max-w-3xl w-full p-6 shadow-2xl space-y-5 border border-slate-100 my-8 animate-scale-in">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider mb-1 ${
@@ -2980,7 +3024,7 @@ export default function App() {
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1.5"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>🖨️ พิมพ์ / บันทึก PDF (TH Sarabun)</span>
+                <span>พิมพ์ / บันทึก PDF (TH Sarabun)</span>
               </button>
 
               <div className="flex items-center gap-2">
@@ -3075,31 +3119,31 @@ export default function App() {
                 handleAskAiProvince(selectedMapProvince);
                 setSelectedMapProvince(null);
               }}
-              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+              className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
             >
               <Bot className="w-4 h-4 text-indigo-200" />
-              <span>🤖 สอบถาม AI วิเคราะห์จังหวัดนี้</span>
+              <span>สอบถามและวิเคราะห์ข้อมูลจังหวัดนี้</span>
             </button>
           </div>
         </div>
       )}
 
       {/* Mobile Bottom Navigation Bar (< md) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-2 py-1.5 flex items-center justify-around shadow-2xl">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-1.5 flex items-center justify-around shadow-lg">
         <button
           onClick={() => setActiveMainTab('dashboard')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
-            activeMainTab === 'dashboard' ? 'text-blue-600 font-black' : 'text-slate-400 font-semibold'
+          className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'dashboard' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
           }`}
         >
           <Activity className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">แดชบอร์ด</span>
+          <span className="text-[10px] mt-0.5">ภาพรวม</span>
         </button>
 
         <button
           onClick={() => setActiveMainTab('map')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
-            activeMainTab === 'map' ? 'text-rose-600 font-black' : 'text-slate-400 font-semibold'
+          className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'map' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
           }`}
         >
           <Map className="w-5 h-5" />
@@ -3108,8 +3152,8 @@ export default function App() {
 
         <button
           onClick={() => setActiveMainTab('clusters')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
-            activeMainTab === 'clusters' ? 'text-amber-600 font-black' : 'text-slate-400 font-semibold'
+          className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'clusters' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
           }`}
         >
           <Flame className="w-5 h-5" />
@@ -3118,18 +3162,18 @@ export default function App() {
 
         <button
           onClick={() => setActiveMainTab('chat')}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
-            activeMainTab === 'chat' ? 'text-indigo-600 font-black' : 'text-slate-400 font-semibold'
+          className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'chat' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
           }`}
         >
-          <Bot className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">AI Chat</span>
+          <MessageSquare className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">ถาม-ตอบ</span>
         </button>
 
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition min-w-[54px] min-h-[44px] ${
-            activeMainTab === 'quality' || activeMainTab === 'reports' ? 'text-purple-600 font-black' : 'text-slate-400 font-semibold'
+          className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition min-w-[54px] min-h-[44px] ${
+            activeMainTab === 'quality' || activeMainTab === 'reports' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
           }`}
         >
           <MoreHorizontal className="w-5 h-5" />

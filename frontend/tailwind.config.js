@@ -7,7 +7,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Prompt', 'Sarabun', 'sans-serif'],
+        sans: ['IBM Plex Sans Thai', 'Sarabun', 'sans-serif'],
       }
     },
   },
