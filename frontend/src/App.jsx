@@ -6,9 +6,19 @@ import {
   Bell, Activity, Calendar, Search, Filter, ChevronRight,
   Award, Database, CheckCircle2, UserCheck, BarChart2, PlusCircle, 
   Trash2, ArrowUpRight, MessageSquare, Map, Layers, Send, Bot, User, Flame,
-  Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive, MoreHorizontal
+  Compass, Newspaper, FileText, Printer, Download, UploadCloud, Youtube, MessageCircle, HardDrive, MoreHorizontal,
+  LogIn, LogOut, Lock
 } from 'lucide-react';
 import ThailandSvgMap from './components/ThailandSvgMap';
+import {
+  authFetch,
+  getAuthConfig,
+  getStoredTokens,
+  handleOidcCallbackIfPresent,
+  startLogin,
+  logout,
+  clearTokens
+} from './auth/oidc';
 
 export const DIMENSIONS = [
   { key: 'sufficiency', name: 'พอเพียง', color: '#8b5cf6', bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
@@ -27,6 +37,15 @@ const DIMENSION_ICONS = {
 };
 
 export default function App() {
+  // Auth & RBAC States
+  const [authReady, setAuthReady] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authError, setAuthError] = useState('');
+
+  const isAnalyst = currentUser?.role === 'analyst' || currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin';
+
   // Navigation Tabs: 'dashboard' | 'map' | 'clusters' | 'chat' | 'quality'
   const [activeMainTab, setActiveMainTab] = useState('dashboard');
   const [activeQualitySubtab, setActiveQualitySubtab] = useState('benchmark');
@@ -114,19 +133,19 @@ export default function App() {
         resBench, resQueue, resGolden, resMap, resClusters, resGraph,
         resReports, resBackup
       ] = await Promise.all([
-        fetch('/api/indices/overview').then(r => r.json()).catch(() => ({ overview: [] })),
-        fetch('/api/feed?limit=30').then(r => r.json()).catch(() => ({ feed: [] })),
-        fetch('/api/indices/provinces').then(r => r.json()).catch(() => ({ provinces: [] })),
-        fetch('/api/alerts').then(r => r.json()).catch(() => ({ alerts: [] })),
-        fetch('/api/indices/timeseries?days=14').then(r => r.json()).catch(() => ({ timeseries: [] })),
-        fetch('/api/quality/benchmark').then(r => r.json()).catch(() => null),
-        fetch('/api/quality/queue?limit=25&status=unreviewed').then(r => r.json()).catch(() => ({ items: [] })),
-        fetch('/api/quality/golden-samples?limit=50').then(r => r.json()).catch(() => ({ samples: [] })),
-        fetch('/api/map/provinces').then(r => r.json()).catch(() => ({ regions: {}, provinces: [] })),
-        fetch('/api/topics/clusters').then(r => r.json()).catch(() => ({ clusters: [] })),
-        fetch('/api/graph/overview').then(r => r.json()).catch(() => null),
-        fetch('/api/reports').then(r => r.json()).catch(() => ({ reports: [] })),
-        fetch('/api/admin/backup').then(r => r.json()).catch(() => null)
+        authFetch('/api/indices/overview').then(r => r.json()).catch(() => ({ overview: [] })),
+        authFetch('/api/feed?limit=30').then(r => r.json()).catch(() => ({ feed: [] })),
+        authFetch('/api/indices/provinces').then(r => r.json()).catch(() => ({ provinces: [] })),
+        authFetch('/api/alerts').then(r => r.json()).catch(() => ({ alerts: [] })),
+        authFetch('/api/indices/timeseries?days=14').then(r => r.json()).catch(() => ({ timeseries: [] })),
+        authFetch('/api/quality/benchmark').then(r => r.json()).catch(() => null),
+        authFetch('/api/quality/queue?limit=25&status=unreviewed').then(r => r.json()).catch(() => ({ items: [] })),
+        authFetch('/api/quality/golden-samples?limit=50').then(r => r.json()).catch(() => ({ samples: [] })),
+        authFetch('/api/map/provinces').then(r => r.json()).catch(() => ({ regions: {}, provinces: [] })),
+        authFetch('/api/topics/clusters').then(r => r.json()).catch(() => ({ clusters: [] })),
+        authFetch('/api/graph/overview').then(r => r.json()).catch(() => null),
+        authFetch('/api/reports').then(r => r.json()).catch(() => ({ reports: [] })),
+        authFetch('/api/admin/backup').then(r => r.json()).catch(() => null)
       ]);
 
       setOverview(resOverview.overview || []);
@@ -185,8 +204,77 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData();
+    const initAuth = async () => {
+      try {
+        const cfg = await getAuthConfig();
+        setAuthEnabled(cfg.auth_enabled);
+
+        if (cfg.auth_enabled) {
+          await handleOidcCallbackIfPresent();
+          const tokens = getStoredTokens();
+          if (!tokens?.access_token) {
+            setAuthReady(true);
+            setLoading(false);
+            return;
+          }
+        }
+
+        const meRes = await authFetch('/api/auth/me');
+        if (meRes.ok) {
+          const me = await meRes.json();
+          setCurrentUser(me);
+          setAuthReady(true);
+          fetchData();
+        } else if (meRes.status === 403) {
+          const err = await meRes.json().catch(() => ({}));
+          setAuthError(err.detail || 'บัญชีของคุณยังไม่ได้รับสิทธิ์เข้าใช้งาน SocialEye');
+          setAuthReady(true);
+          setLoading(false);
+        } else {
+          clearTokens();
+          setCurrentUser(null);
+          setAuthReady(true);
+          setLoading(false);
+        }
+      } catch (err) {
+        setAuthError(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อระบบยืนยันตัวตน');
+        setAuthReady(true);
+        setLoading(false);
+      }
+    };
+    initAuth();
   }, []);
+
+  const downloadWithAuth = async (url, filename) => {
+    try {
+      const res = await authFetch(url);
+      if (!res.ok) throw new Error('ไม่สามารถดาวน์โหลดไฟล์ได้');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      alert(err.message || 'เกิดข้อผิดพลาดในการดาวน์โหลด');
+    }
+  };
+
+  const openHtmlWithAuth = async (url) => {
+    try {
+      const res = await authFetch(url);
+      if (!res.ok) throw new Error('ไม่สามารถเปิดรายงานได้');
+      const html = await res.text();
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+    } catch (err) {
+      alert(err.message || 'เกิดข้อผิดพลาดในการเปิดรายงาน');
+    }
+  };
 
   useEffect(() => {
     if (activeMainTab === 'chat' && chatBottomRef.current) {
@@ -205,7 +293,7 @@ export default function App() {
     setChatLoading(true);
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await authFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages })
@@ -240,7 +328,7 @@ export default function App() {
     setChatMessages(newMessages);
     setChatLoading(true);
 
-    fetch('/api/chat', {
+    authFetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: newMessages })
@@ -268,7 +356,7 @@ export default function App() {
   const handleGenerateReport = async () => {
     setGeneratingReport(true);
     try {
-      const res = await fetch('/api/reports/generate', {
+      const res = await authFetch('/api/reports/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_type: reportGenType })
@@ -288,7 +376,7 @@ export default function App() {
   const handlePublishReport = async (rep) => {
     setReportSavingReview(true);
     try {
-      const res = await fetch(`/api/reports/${rep.id}/review`, {
+      const res = await authFetch(`/api/reports/${rep.id}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -317,7 +405,7 @@ export default function App() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch('/api/ingest/wisesight', {
+      const res = await authFetch('/api/ingest/wisesight', {
         method: 'POST',
         body: formData
       });
@@ -335,7 +423,7 @@ export default function App() {
     setYoutubeRunning(true);
     setYoutubeMsg('กำลังดึงคลิปข่าวล่าสุดจาก YouTube...');
     try {
-      const res = await fetch('/api/ingest/youtube', { method: 'POST' });
+      const res = await authFetch('/api/ingest/youtube', { method: 'POST' });
       const data = await res.json();
       setYoutubeMsg(`ดึงและวิเคราะห์คลิปข่าวสำเร็จ (${data.new_videos_ingested || 0} คลิปใหม่)`);
       fetchData();
@@ -350,7 +438,7 @@ export default function App() {
     setPantipRunning(true);
     setPantipMsg('กำลังตรวจสอบกระทู้จิตอาสาและคุณธรรมบน Pantip...');
     try {
-      const res = await fetch('/api/ingest/pantip', { method: 'POST' });
+      const res = await authFetch('/api/ingest/pantip', { method: 'POST' });
       const data = await res.json();
       setPantipMsg(data.message || 'ตรวจสอบเสร็จสิ้น');
     } catch (e) {
@@ -364,7 +452,7 @@ export default function App() {
     setRetentionCleaning(true);
     setRetentionMsg('กำลังรันกระบวนการ PDPA Data Retention...');
     try {
-      const res = await fetch('/api/admin/retention/run', { method: 'POST' });
+      const res = await authFetch('/api/admin/retention/run', { method: 'POST' });
       const data = await res.json();
       setRetentionMsg(data.message || 'ลบข้อมูลหมดอายุเรียบร้อย');
     } catch (e) {
@@ -378,7 +466,7 @@ export default function App() {
     setIngesting(true);
     setIngestStatusMsg('กำลังส่งสัญญาณดึงและวิเคราะห์ข่าวในพื้นหลัง...');
     try {
-      const res = await fetch('/api/ingest/trigger', { method: 'POST' });
+      const res = await authFetch('/api/ingest/trigger', { method: 'POST' });
       const data = await res.json();
       setIngestStatusMsg(data.message || 'ระบบกำลังดึงข่าวและวิเคราะห์ผ่าน LiteLLM...');
       setTimeout(() => {
@@ -395,7 +483,7 @@ export default function App() {
   const triggerSeedDataset = async () => {
     setSeedStatusMsg('กำลังนำเข้าชุดข้อมูลทองคำ...');
     try {
-      const res = await fetch('/api/quality/seed', { method: 'POST' });
+      const res = await authFetch('/api/quality/seed', { method: 'POST' });
       const data = await res.json();
       setSeedStatusMsg(data.message);
       fetchData();
@@ -424,7 +512,7 @@ export default function App() {
     setSavingLabel(true);
     const evalId = editingItem.evaluation?.id || editingItem.id;
     try {
-      const res = await fetch(`/api/content/${evalId}/label`, {
+      const res = await authFetch(`/api/content/${evalId}/label`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -453,7 +541,7 @@ export default function App() {
     const evalId = item.evaluation?.id || item.id;
     const scores = item.evaluation?.scores || item.scores;
     try {
-      await fetch(`/api/content/${evalId}/label`, {
+      await authFetch(`/api/content/${evalId}/label`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -521,6 +609,83 @@ export default function App() {
     if (score >= 2.0) return 'bg-amber-100 text-amber-800 border-amber-300';
     return 'bg-rose-100 text-rose-800 border-rose-300';
   };
+
+  const roleBadgeMap = {
+    admin: { label: 'Admin', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
+    analyst: { label: 'Analyst', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+    viewer: { label: 'Viewer', cls: 'bg-slate-100 text-slate-700 border-slate-200' }
+  };
+  const roleBadge = roleBadgeMap[currentUser?.role] || roleBadgeMap.viewer;
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg mb-4 animate-pulse">
+          <Eye className="w-6 h-6" />
+        </div>
+        <p className="text-sm font-bold text-slate-700">กำลังตรวจสอบสิทธิ์การเข้าใช้งาน SocialEye...</p>
+      </div>
+    );
+  }
+
+  if (authEnabled && !currentUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50/50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/80 shadow-xl space-y-6 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 mx-auto">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">SocialEye</h1>
+            <p className="text-xs font-semibold text-slate-500">
+              ระบบ AI Agent เฝ้าระวังสื่อและโซเชียลมีเดีย ต่อดัชนีคุณธรรม 5 ด้าน
+            </p>
+          </div>
+
+          {authError ? (
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-3 text-left">
+              <div className="flex items-center gap-2 font-black text-rose-900">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>ไม่สามารถเข้าถึงระบบได้</span>
+              </div>
+              <p className="leading-relaxed">{authError}</p>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setAuthError(''); startLogin(); }}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition"
+                >
+                  เข้าสู่ระบบใหม่
+                </button>
+                <button
+                  onClick={logout}
+                  className="py-2.5 px-3 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold text-xs transition"
+                >
+                  ออกจากระบบ
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-[11px] text-slate-600 leading-relaxed">
+                กรุณายืนยันตัวตนผ่านระบบกลาง <strong className="text-slate-800">Authentik SSO (2FA)</strong> เพื่อเข้าใช้งานตามสิทธิ์ (Admin / Analyst / Viewer)
+              </div>
+              <button
+                onClick={startLogin}
+                className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white font-bold text-sm shadow-md shadow-blue-500/20 transition flex items-center justify-center gap-2"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>เข้าสู่ระบบด้วย Authentik SSO</span>
+              </button>
+            </div>
+          )}
+
+          <p className="text-[10px] text-slate-400">
+            ดัชนีสะท้อนจากสื่อออนไลน์ • Protected by OIDC PKCE & 2FA
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-24 md:pb-16">
@@ -621,18 +786,43 @@ export default function App() {
               </button>
             </div>
 
-            <button
-              onClick={triggerIngest}
-              disabled={ingesting}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-xs ${
-                ingesting 
-                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 active:scale-95 text-white'
-              }`}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${ingesting ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{ingesting ? 'กำลังดึงข่าว...' : 'ดึงและวิเคราะห์ข่าว'}</span>
-            </button>
+            {isAdmin && (
+              <button
+                onClick={triggerIngest}
+                disabled={ingesting}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-xs ${
+                  ingesting 
+                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 active:scale-95 text-white'
+                }`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${ingesting ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{ingesting ? 'กำลังดึงข่าว...' : 'ดึงและวิเคราะห์ข่าว'}</span>
+              </button>
+            )}
+
+            {currentUser && (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200">
+                <div className="hidden lg:flex flex-col items-end leading-tight">
+                  <span className="text-[11px] font-bold text-slate-800 max-w-[130px] truncate">{currentUser.name}</span>
+                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-black border uppercase ${roleBadge.cls}`}>
+                    {roleBadge.label}
+                  </span>
+                </div>
+                <span className={`lg:hidden px-2 py-0.5 rounded-full text-[10px] font-black border uppercase ${roleBadge.cls}`}>
+                  {roleBadge.label}
+                </span>
+                {authEnabled && (
+                  <button
+                    onClick={logout}
+                    title="ออกจากระบบ"
+                    className="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -1863,13 +2053,15 @@ export default function App() {
                   </button>
                 </div>
 
-                <button
-                  onClick={triggerSeedDataset}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-slate-200"
-                >
-                  <Database className="w-3.5 h-3.5 text-indigo-600" />
-                  <span className="hidden sm:inline">โหลดชุดข้อมูลตัวอย่าง</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={triggerSeedDataset}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-slate-200"
+                  >
+                    <Database className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="hidden sm:inline">โหลดชุดข้อมูลตัวอย่าง</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2052,22 +2244,24 @@ export default function App() {
                             )}
                           </div>
 
-                          <div className="flex flex-col gap-1.5 shrink-0">
-                            <button
-                              onClick={() => handleQuickConfirm(item)}
-                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1 shadow-xs"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>ยืนยัน AI 100%</span>
-                            </button>
-                            <button
-                              onClick={() => handleOpenEdit(item)}
-                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1 border border-slate-200"
-                            >
-                              <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
-                              <span>ปรับแก้คะแนน</span>
-                            </button>
-                          </div>
+                          {isAnalyst && (
+                            <div className="flex flex-col gap-1.5 shrink-0">
+                              <button
+                                onClick={() => handleQuickConfirm(item)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1 shadow-xs"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>ยืนยัน AI 100%</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenEdit(item)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1 border border-slate-200"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>ปรับแก้คะแนน</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
@@ -2233,38 +2427,38 @@ export default function App() {
                     </button>
                   </div>
 
-                  <button
-                    onClick={handleGenerateReport}
-                    disabled={generatingReport}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition ${
-                      generatingReport
-                        ? 'bg-purple-300 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 active:scale-95'
-                    }`}
-                  >
-                    <Sparkles className={`w-4 h-4 ${generatingReport ? 'animate-spin' : ''}`} />
-                    <span>{generatingReport ? 'AI กำลังประมวลผลร่างรายงาน...' : '✨ สร้างร่างรายงานใหม่'}</span>
-                  </button>
+                  {isAnalyst && (
+                    <button
+                      onClick={handleGenerateReport}
+                      disabled={generatingReport}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition ${
+                        generatingReport
+                          ? 'bg-purple-300 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 active:scale-95'
+                      }`}
+                    >
+                      <Sparkles className={`w-4 h-4 ${generatingReport ? 'animate-spin' : ''}`} />
+                      <span>{generatingReport ? 'AI กำลังประมวลผลร่างรายงาน...' : '✨ สร้างร่างรายงานใหม่'}</span>
+                    </button>
+                  )}
 
-                  <a
-                    href="/api/reports/export/csv"
-                    download="moral_indices_export.csv"
+                  <button
+                    onClick={() => downloadWithAuth('/api/reports/export/csv', 'moral_indices_export.csv')}
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition"
                     title="ส่งออกดัชนีคุณธรรมรายวันเปิดใน Microsoft Excel"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>ดัชนีรายวัน (Excel)</span>
-                  </a>
+                  </button>
 
-                  <a
-                    href="/api/reports/export/provinces/csv"
-                    download="thailand_77_provinces_moral.csv"
+                  <button
+                    onClick={() => downloadWithAuth('/api/reports/export/provinces/csv', 'thailand_77_provinces_moral.csv')}
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition"
                     title="ส่งออกข้อมูล 77 จังหวัดเปิดใน Microsoft Excel"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>สถิติ 77 จังหวัด (Excel)</span>
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2340,7 +2534,7 @@ export default function App() {
                             </button>
 
                             <button
-                              onClick={() => window.open(`/api/reports/${rep.id}/html`, '_blank')}
+                              onClick={() => openHtmlWithAuth(`/api/reports/${rep.id}/html`)}
                               className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition flex items-center gap-1 shadow-xs"
                             >
                               <Printer className="w-3.5 h-3.5" />
@@ -2355,7 +2549,8 @@ export default function App() {
               )}
             </div>
 
-            {/* Section 2: External Connectors & Data Import */}
+            {/* Section 2: External Connectors & Data Import (Admin Only) */}
+            {isAdmin && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               
               {/* Connector 1: Wisesight Trend CSV/JSON */}
@@ -2551,6 +2746,7 @@ export default function App() {
                 </div>
               )}
             </div>
+            )}
 
           </div>
         )}
@@ -2778,7 +2974,7 @@ export default function App() {
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-100">
               <button
-                onClick={() => window.open(`/api/reports/${selectedReportModal.id}/html`, '_blank')}
+                onClick={() => openHtmlWithAuth(`/api/reports/${selectedReportModal.id}/html`)}
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1.5"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -2794,7 +2990,7 @@ export default function App() {
                   ปิดหน้าต่าง
                 </button>
 
-                {selectedReportModal.status !== 'published' && (
+                {isAnalyst && selectedReportModal.status !== 'published' && (
                   <button
                     type="button"
                     onClick={() => handlePublishReport(selectedReportModal)}
@@ -2989,14 +3185,39 @@ export default function App() {
               </button>
             </div>
 
-            <button
-              onClick={() => { triggerIngest(); setMobileMenuOpen(false); }}
-              disabled={ingesting}
-              className="w-full py-3.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition"
-            >
-              <RefreshCw className={`w-4 h-4 ${ingesting ? 'animate-spin' : ''}`} />
-              <span>{ingesting ? 'กำลังดึงข่าวในพื้นหลัง...' : 'ซิงค์ดึงข่าวและวิเคราะห์ทันที'}</span>
-            </button>
+            {currentUser && (
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-slate-900 truncate">{currentUser.name}</p>
+                  <p className="text-[11px] text-slate-500 truncate">{currentUser.email}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border uppercase ${roleBadge.cls}`}>
+                    {roleBadge.label}
+                  </span>
+                  {authEnabled && (
+                    <button
+                      onClick={logout}
+                      className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>ออก</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {isAdmin && (
+              <button
+                onClick={() => { triggerIngest(); setMobileMenuOpen(false); }}
+                disabled={ingesting}
+                className="w-full py-3.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition"
+              >
+                <RefreshCw className={`w-4 h-4 ${ingesting ? 'animate-spin' : ''}`} />
+                <span>{ingesting ? 'กำลังดึงข่าวในพื้นหลัง...' : 'ซิงค์ดึงข่าวและวิเคราะห์ทันที'}</span>
+              </button>
+            )}
           </div>
         </div>
       )}

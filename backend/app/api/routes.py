@@ -20,11 +20,45 @@ from app.rag.graph import graph_manager
 from app.agent.policy_advisor import generate_policy_report, generate_report_printable_html
 from app.ingest.connectors import import_wisesight_data, run_youtube_connector, run_pantip_connector
 from app.db.retention import clean_expired_content, get_backup_and_storage_status
+from app.config import settings
+from app.auth import (
+    Role,
+    UserContext,
+    get_current_user,
+    require_viewer,
+    require_analyst,
+    require_admin,
+)
 
 router = APIRouter()
 
+@router.get("/auth/config")
+async def get_auth_config():
+    """Public OIDC configuration for the frontend SPA."""
+    return {
+        "auth_enabled": settings.is_auth_enforced,
+        "issuer": settings.OIDC_ISSUER,
+        "client_id": settings.OIDC_CLIENT_ID,
+    }
+
+@router.get("/auth/me")
+async def get_authenticated_user(user: UserContext = Depends(get_current_user)):
+    """Returns the authenticated user's profile and canonical SocialEye role."""
+    return {
+        "sub": user.sub,
+        "email": user.email,
+        "name": user.name,
+        "display_identity": user.display_identity,
+        "role": user.role.value,
+        "groups": user.groups,
+        "auth_enabled": settings.is_auth_enforced,
+    }
+
 @router.get("/indices/overview")
-async def get_indices_overview(session: AsyncSession = Depends(get_db)):
+async def get_indices_overview(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns the 5 moral index cards (0.00 to 5.00), sample counts, and 7-day trend."""
     overview = []
     today_str = date.today().isoformat()
@@ -86,7 +120,11 @@ async def get_indices_overview(session: AsyncSession = Depends(get_db)):
     return {"overview": overview, "updated_at": datetime.utcnow().isoformat()}
 
 @router.get("/indices/timeseries")
-async def get_indices_timeseries(days: int = 14, session: AsyncSession = Depends(get_db)):
+async def get_indices_timeseries(
+    days: int = 14,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns daily moral scores over the specified number of days."""
     start_date = (date.today() - timedelta(days=days)).isoformat()
     q = select(DailyIndex).where(
@@ -108,7 +146,10 @@ async def get_indices_timeseries(days: int = 14, session: AsyncSession = Depends
     return {"timeseries": list(by_date.values())}
 
 @router.get("/indices/provinces")
-async def get_provinces_ranking(session: AsyncSession = Depends(get_db)):
+async def get_provinces_ranking(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns moral scores aggregated per province."""
     stmt = (
         select(
@@ -148,7 +189,12 @@ async def get_provinces_ranking(session: AsyncSession = Depends(get_db)):
     return {"provinces": provinces}
 
 @router.get("/feed")
-async def get_content_feed(limit: int = 30, offset: int = 0, session: AsyncSession = Depends(get_db)):
+async def get_content_feed(
+    limit: int = 30,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns real-time analyzed news/social feed with moral evaluations and quotes."""
     stmt = (
         select(Content, Evaluation)
@@ -195,7 +241,8 @@ async def get_content_feed(limit: int = 30, offset: int = 0, session: AsyncSessi
 async def review_content_label(
     evaluation_id: int,
     payload: dict,
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_analyst),
 ):
     """
     Allows an analyst or human reviewer to correct moral scores, add review notes,
@@ -234,7 +281,7 @@ async def review_content_label(
         evaluation.province = payload["province"]
 
     evaluation.is_reviewed = True
-    evaluation.reviewed_by = payload.get("reviewed_by", "Analyst (Expert Review)")
+    evaluation.reviewed_by = user.display_identity
 
     # Optionally promote to Golden Dataset
     promoted_to_golden = False
@@ -270,7 +317,10 @@ async def review_content_label(
 # --- Phase 2: Quality & Human-in-the-Loop Endpoints ---
 
 @router.get("/quality/benchmark")
-async def get_quality_benchmark(session: AsyncSession = Depends(get_db)):
+async def get_quality_benchmark(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns AI vs Human agreement, Cohen's Kappa, QWK, and Target Gate Status (>= 70%)."""
     metrics = await compute_benchmark_metrics(session)
     return metrics
@@ -280,7 +330,8 @@ async def get_review_queue(
     limit: int = 20,
     offset: int = 0,
     status: str = "unreviewed", # "unreviewed", "reviewed", "all"
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
 ):
     """Returns queue of news items prioritized for human evaluation & labeling."""
     query = select(Content, Evaluation).join(Evaluation, Content.id == Evaluation.content_id)
@@ -334,7 +385,8 @@ async def get_golden_samples(
     q: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
 ):
     """Retrieves curated Golden Dataset samples."""
     stmt = select(GoldenSample)
@@ -375,7 +427,8 @@ async def get_golden_samples(
 @router.post("/quality/golden-samples")
 async def create_golden_sample(
     payload: dict,
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_analyst),
 ):
     """Manually adds a new sample into the Golden Dataset."""
     title = payload.get("title")
@@ -398,7 +451,7 @@ async def create_golden_sample(
         province=payload.get("province", "ระดับประเทศ"),
         category=payload.get("category", "general"),
         embedding=emb,
-        created_by=payload.get("created_by", "Expert Panel")
+        created_by=user.display_identity
     )
     session.add(sample)
     await session.commit()
@@ -407,7 +460,11 @@ async def create_golden_sample(
     return {"status": "success", "id": sample.id, "message": "เพิ่มตัวอย่างเข้าชุดข้อมูลทองคำเรียบร้อย"}
 
 @router.delete("/quality/golden-samples/{sample_id}")
-async def delete_golden_sample(sample_id: int, session: AsyncSession = Depends(get_db)):
+async def delete_golden_sample(
+    sample_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_analyst),
+):
     """Deletes a Golden Sample by ID."""
     stmt = select(GoldenSample).where(GoldenSample.id == sample_id)
     sample = (await session.execute(stmt)).scalar_one_or_none()
@@ -419,13 +476,20 @@ async def delete_golden_sample(sample_id: int, session: AsyncSession = Depends(g
     return {"status": "success", "message": "ลบตัวอย่างเรียบร้อย"}
 
 @router.post("/quality/seed")
-async def trigger_seed_dataset(session: AsyncSession = Depends(get_db)):
+async def trigger_seed_dataset(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
     """Triggers populating initial Golden Dataset."""
     count = await seed_golden_dataset(session)
     return {"status": "success", "message": f"นำเข้าชุดข้อมูลทองคำเรียบร้อย (มีทั้งหมด {count} รายการ)"}
 
 @router.get("/alerts")
-async def get_alerts(limit: int = 20, session: AsyncSession = Depends(get_db)):
+async def get_alerts(
+    limit: int = 20,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns recent anomaly alerts."""
     q = select(Alert).order_by(desc(Alert.triggered_at)).limit(limit)
     rows = (await session.execute(q)).scalars().all()
@@ -434,7 +498,11 @@ async def get_alerts(limit: int = 20, session: AsyncSession = Depends(get_db)):
 # --- Phase 3: Intelligence & Knowledge Graph Endpoints ---
 
 @router.post("/chat")
-async def chat_moral_assistant(payload: dict, session: AsyncSession = Depends(get_db)):
+async def chat_moral_assistant(
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Conversational Moral Intelligence Chat Agent powered by Gemma-4 and RAG."""
     messages = payload.get("messages", [])
     if not messages:
@@ -443,19 +511,25 @@ async def chat_moral_assistant(payload: dict, session: AsyncSession = Depends(ge
     return res
 
 @router.get("/topics/clusters")
-async def get_clusters_endpoint(session: AsyncSession = Depends(get_db)):
+async def get_clusters_endpoint(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns dynamic moral issue clusters with narrative summaries and momentum."""
     clusters = await get_issue_clusters(session)
     return {"clusters": clusters}
 
 @router.get("/map/provinces")
-async def get_map_provinces_endpoint(session: AsyncSession = Depends(get_db)):
+async def get_map_provinces_endpoint(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Returns regional and 77-province aggregated moral index data for interactive choropleth map."""
     map_data = await get_thailand_map_overview(session)
     return map_data
 
 @router.get("/graph/overview")
-async def get_graph_overview_endpoint():
+async def get_graph_overview_endpoint(_: UserContext = Depends(require_viewer)):
     """Returns Knowledge Graph (Neo4j / In-Memory) entity relationship overview."""
     overview = await graph_manager.get_graph_overview()
     return overview
@@ -468,7 +542,10 @@ async def _bg_run_ingest():
         print(f"Background ingest error: {e}")
 
 @router.post("/ingest/trigger")
-async def trigger_manual_ingest(background_tasks: BackgroundTasks):
+async def trigger_manual_ingest(
+    background_tasks: BackgroundTasks,
+    _: UserContext = Depends(require_admin),
+):
     """Manually triggers an ingestion and AI evaluation cycle in the background."""
     background_tasks.add_task(_bg_run_ingest)
     return {"status": "success", "message": "เริ่มกระบวนการดึงและวิเคราะห์ข่าวในพื้นหลังแล้ว ระบบจะอัปเดตข้อมูลอัตโนมัติ"}
@@ -478,16 +555,23 @@ async def trigger_manual_ingest(background_tasks: BackgroundTasks):
 # =============================================================================
 
 @router.get("/reports")
-async def get_reports_list(session: AsyncSession = Depends(get_db)):
+async def get_reports_list(
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_viewer),
+):
     """Lists generated moral policy reports."""
-    stmt = select(PolicyReport).order_by(desc(PolicyReport.created_at)).limit(30)
+    stmt = select(PolicyReport)
+    if user.role == Role.VIEWER:
+        stmt = stmt.where(PolicyReport.status == "published")
+    stmt = stmt.order_by(desc(PolicyReport.created_at)).limit(30)
     reports = (await session.execute(stmt)).scalars().all()
     return {"reports": reports}
 
 @router.post("/reports/generate")
 async def create_policy_report(
     payload: dict,
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_analyst),
 ):
     """Triggers the Policy Advisor Agent to synthesize a new policy report."""
     report_type = payload.get("report_type", "weekly")
@@ -500,19 +584,31 @@ async def create_policy_report(
     }
 
 @router.get("/reports/{report_id}")
-async def get_report_details(report_id: int, session: AsyncSession = Depends(get_db)):
+async def get_report_details(
+    report_id: int,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_viewer),
+):
     """Retrieves full details of a specific policy report."""
     report = await session.get(PolicyReport, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if user.role == Role.VIEWER and report.status != "published":
+        raise HTTPException(status_code=403, detail="สิทธิ์ Viewer สามารถดูได้เฉพาะรายงานที่เผยแพร่แล้วเท่านั้น")
     return {"report": report}
 
 @router.get("/reports/{report_id}/html", response_class=HTMLResponse)
-async def get_report_printable_view(report_id: int, session: AsyncSession = Depends(get_db)):
+async def get_report_printable_view(
+    report_id: int,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_viewer),
+):
     """Renders official TH Sarabun formatted printable HTML view for Save to PDF."""
     report = await session.get(PolicyReport, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if user.role == Role.VIEWER and report.status != "published":
+        raise HTTPException(status_code=403, detail="สิทธิ์ Viewer สามารถดูได้เฉพาะรายงานที่เผยแพร่แล้วเท่านั้น")
     html_content = generate_report_printable_html(report)
     return HTMLResponse(content=html_content, status_code=200)
 
@@ -520,7 +616,8 @@ async def get_report_printable_view(report_id: int, session: AsyncSession = Depe
 async def review_and_publish_report(
     report_id: int,
     payload: dict,
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_analyst),
 ):
     """Allows an Analyst to review, add notes, and publish an AI-drafted report."""
     report = await session.get(PolicyReport, report_id)
@@ -528,7 +625,7 @@ async def review_and_publish_report(
         raise HTTPException(status_code=404, detail="Report not found")
     
     report.status = payload.get("status", "published")
-    report.reviewed_by = payload.get("reviewed_by", "Analyst Panel")
+    report.reviewed_by = user.display_identity
     report.reviewer_notes = payload.get("reviewer_notes", report.reviewer_notes)
     if "executive_summary" in payload:
         report.executive_summary = payload["executive_summary"]
@@ -538,7 +635,10 @@ async def review_and_publish_report(
     return {"status": "success", "message": "อัปเดตและเผยแพร่รายงานสำเร็จ", "report": report}
 
 @router.get("/reports/export/csv")
-async def export_indices_csv(session: AsyncSession = Depends(get_db)):
+async def export_indices_csv(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Exports daily moral indices as UTF-8-BOM CSV compatible with Excel."""
     stmt = (
         select(DailyIndex)
@@ -573,7 +673,10 @@ async def export_indices_csv(session: AsyncSession = Depends(get_db)):
     )
 
 @router.get("/reports/export/provinces/csv")
-async def export_provinces_csv(session: AsyncSession = Depends(get_db)):
+async def export_provinces_csv(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
     """Exports 77 provinces moral scores as UTF-8-BOM CSV compatible with Excel."""
     map_data = await get_thailand_map_overview(session)
     provinces_list = map_data.get("provinces", [])
@@ -612,7 +715,8 @@ async def export_provinces_csv(session: AsyncSession = Depends(get_db)):
 @router.post("/ingest/wisesight")
 async def upload_wisesight_file(
     file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
 ):
     """Uploads and ingests a Wisesight Trend CSV or JSON file into SocialEye."""
     contents = await file.read()
@@ -620,24 +724,33 @@ async def upload_wisesight_file(
     return res
 
 @router.post("/ingest/youtube")
-async def trigger_youtube_feed(session: AsyncSession = Depends(get_db)):
+async def trigger_youtube_feed(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
     """Ingests latest video news from Thai news YouTube channels."""
     res = await run_youtube_connector(session)
     return res
 
 @router.post("/ingest/pantip")
-async def trigger_pantip_scan(session: AsyncSession = Depends(get_db)):
+async def trigger_pantip_scan(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
     """Triggers Pantip public community discussions scanner."""
     res = await run_pantip_connector(session)
     return res
 
 @router.get("/admin/backup")
-async def get_backup_status():
+async def get_backup_status(_: UserContext = Depends(require_admin)):
     """Returns Garage S3 and Cloudflare R2 backup status."""
     return get_backup_and_storage_status()
 
 @router.post("/admin/retention/run")
-async def trigger_retention_cleanup(session: AsyncSession = Depends(get_db)):
+async def trigger_retention_cleanup(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
     """Runs PDPA 90-day retention cleanup on raw data."""
     res = await clean_expired_content(session, retention_days=90)
     return res

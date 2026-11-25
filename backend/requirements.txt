@@ -12,3 +12,4 @@ pythainlp>=5.1.0
 python-multipart>=0.0.12
 neo4j>=5.15.0
 numpy>=1.26.0
+PyJWT[crypto]>=2.9.0

@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: str = "*"
 
+    # Authentik OIDC & RBAC
+    AUTH_ENABLED: bool = True
+    OIDC_ISSUER: str = "https://auth.addpay.in.th/application/o/socialeye/"
+    OIDC_CLIENT_ID: str = "socialeye-web"
+    OIDC_JWKS_URL: str = ""
+    AUTH_DEV_ROLE: str = "admin"
+
+    @property
+    def is_auth_enforced(self) -> bool:
+        if self.APP_ENV.lower() == "production":
+            return True
+        return self.AUTH_ENABLED
+
     class Config:
         env_file = ".env"
         extra = "ignore"
