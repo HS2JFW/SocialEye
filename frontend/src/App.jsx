@@ -2551,6 +2551,7 @@ export default function App() {
 
             {/* Section 2: External Connectors & Data Import (Admin Only) */}
             {isAdmin && (
+            <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               
               {/* Connector 1: Wisesight Trend CSV/JSON */}
@@ -2746,6 +2747,7 @@ export default function App() {
                 </div>
               )}
             </div>
+            </>
             )}
 
           </div>
