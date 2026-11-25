@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings as env_settings
 from app.db.models import DataSource, SystemSetting
 from app.db.session import AsyncSessionLocal
-from app.ingest.rss import RSS_FEEDS
 
 SECRET_MASK = "••••••••"
 
@@ -55,6 +54,7 @@ async def seed_default_settings_and_sources(session: AsyncSession) -> None:
 
     source_count = (await session.execute(select(func.count(DataSource.id)))).scalar() or 0
     if source_count == 0:
+        from app.ingest.rss import RSS_FEEDS
         for feed in RSS_FEEDS:
             source_type = "google_news" if "news.google.com" in feed["url"] else "rss"
             session.add(
