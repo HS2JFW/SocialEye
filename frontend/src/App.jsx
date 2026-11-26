@@ -138,6 +138,7 @@ export default function App() {
   const [testAlertMsg, setTestAlertMsg] = useState('');
   const [testingLlm, setTestingLlm] = useState(false);
   const [testLlmResult, setTestLlmResult] = useState(null);
+  const [activePromptAgent, setActivePromptAgent] = useState('prompt_scoring');
   const [newSourceName, setNewSourceName] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceKeywords, setNewSourceKeywords] = useState('');
@@ -216,6 +217,26 @@ export default function App() {
       setTestLlmResult({ status: 'error', message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ Gateway', models: [] });
     } finally {
       setTestingLlm(false);
+    }
+  };
+
+  const handleResetAiDefaults = async (target) => {
+    try {
+      setSavingSettings(true);
+      setSettingsMsg('');
+      const res = await authFetch('/api/admin/settings/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSysSettings(data.settings || sysSettings);
+        setSysMeta(data.meta || sysMeta);
+        setSettingsMsg('คืนค่าเริ่มต้นเรียบร้อย');
+      }
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -2967,6 +2988,7 @@ export default function App() {
 
             {/* SUBTAB 2: AI MODEL & API PROVIDER */}
             {activeSettingsTab === 'ai' && (
+              <>
               <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-5 text-left">
                 <div className="border-b border-slate-100 pb-3">
                   <h3 className="text-sm font-bold text-slate-900">การตั้งค่า AI Model และ API Gateway (OpenAI / LiteLLM Compatible)</h3>
@@ -3073,6 +3095,229 @@ export default function App() {
                   )}
                 </div>
               </form>
+
+              {/* CARD 2: SYSTEM PROMPTS (3 AGENTS) */}
+              <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-5 text-left mt-6">
+                <div className="border-b border-slate-100 pb-3 space-y-1">
+                  <h3 className="text-sm font-bold text-slate-900">การปรับแต่งคำสั่ง System Prompts (3 Agents)</h3>
+                  <p className="text-xs text-slate-500">
+                    แก้ไขบทบาท น้ำเสียง และกติกาการวิเคราะห์ของ AI ได้อย่างปลอดภัย โดยระบบจะล็อกและต่อท้ายโครงสร้าง JSON Output Schema ให้อัตโนมัติ
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap justify-start gap-1.5">
+                  {[
+                    { key: 'prompt_scoring', label: 'Scoring Agent (วิเคราะห์ข่าว)' },
+                    { key: 'prompt_chat', label: 'Chat Agent (ถาม-ตอบข้อมูล)' },
+                    { key: 'prompt_advisor', label: 'Policy Advisor (ร่างรายงาน)' },
+                  ].map((ag) => (
+                    <button
+                      key={ag.key}
+                      type="button"
+                      onClick={() => setActivePromptAgent(ag.key)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                        activePromptAgent === ag.key
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {ag.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-2">
+                  <textarea
+                    rows="7"
+                    value={sysSettings[activePromptAgent] ?? ''}
+                    onChange={(e) => setSysSettings({ ...sysSettings, [activePromptAgent]: e.target.value })}
+                    className="w-full px-3.5 py-2.5 text-xs leading-relaxed rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 font-sans"
+                    placeholder="ระบุคำสั่ง System Prompt..."
+                  />
+                  {activePromptAgent !== 'prompt_chat' && (
+                    <p className="text-[11px] text-slate-400">
+                      หมายเหตุ: โครงสร้าง JSON Output Schema ถูกล็อกไว้ในระบบเบื้องหลังเพื่อป้องกันการ Parse JSON ผิดพลาด
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-3 flex flex-wrap items-center justify-start gap-2.5 border-t border-slate-100">
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition"
+                  >
+                    {savingSettings ? 'กำลังบันทึก...' : 'บันทึก System Prompts'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleResetAiDefaults('prompts')}
+                    disabled={savingSettings}
+                    className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold transition"
+                  >
+                    คืนค่าเริ่มต้น (Reset Prompts)
+                  </button>
+                  {sysMeta[activePromptAgent]?.updated_by && (
+                    <span className="text-[11px] text-slate-400">
+                      แก้ไขล่าสุดโดย: {sysMeta[activePromptAgent].updated_by}
+                    </span>
+                  )}
+                </div>
+              </form>
+
+              {/* CARD 3: MORAL RUBRICS */}
+              <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-6 text-left mt-6">
+                <div className="border-b border-slate-100 pb-3 space-y-1">
+                  <h3 className="text-sm font-bold text-slate-900">เกณฑ์การให้คะแนนคุณธรรม 5 ด้าน (Moral Rubrics)</h3>
+                  <p className="text-xs text-slate-500">
+                    ปรับนิยามคุณธรรม 5 ด้าน เกณฑ์สเกลคะแนน (-2 ถึง +2) และกฎกรณีพิเศษ ระบบจะนำไปใช้ประเมินข่าวทันที
+                  </p>
+                </div>
+
+                {/* 5 Dimension Definitions */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold text-slate-800">1. นิยามคุณธรรม 5 ด้าน</h4>
+                  <div className="grid grid-cols-1 gap-3">
+                    {DIMENSIONS.map((dim) => (
+                      <div key={dim.key} className="space-y-1">
+                        <label className="block text-xs font-semibold text-slate-700">{dim.name} ({dim.key})</label>
+                        <input
+                          type="text"
+                          value={sysSettings.moral_rubric?.dimensions?.[dim.key] ?? ''}
+                          onChange={(e) => setSysSettings({
+                            ...sysSettings,
+                            moral_rubric: {
+                              ...(sysSettings.moral_rubric || {}),
+                              dimensions: {
+                                ...(sysSettings.moral_rubric?.dimensions || {}),
+                                [dim.key]: e.target.value
+                              }
+                            }
+                          })}
+                          className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Scale -2 to +2 */}
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-800">2. คำอธิบายเกณฑ์คะแนนรายระดับ (-2 ถึง +2)</h4>
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {['+2', '+1', '0', '-1', '-2'].map((lvl) => (
+                      <div key={lvl} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <span className="w-12 px-2 py-1 rounded bg-slate-100 text-slate-800 text-xs font-bold text-center shrink-0">
+                          {lvl}
+                        </span>
+                        <input
+                          type="text"
+                          value={sysSettings.moral_rubric?.scale?.[lvl] ?? ''}
+                          onChange={(e) => setSysSettings({
+                            ...sysSettings,
+                            moral_rubric: {
+                              ...(sysSettings.moral_rubric || {}),
+                              scale: {
+                                ...(sysSettings.moral_rubric?.scale || {}),
+                                [lvl]: e.target.value
+                              }
+                            }
+                          })}
+                          className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Ambiguity Rules */}
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-start gap-3">
+                    <h4 className="text-xs font-bold text-slate-800">3. กฎกรณีพิเศษ / เคสกำกวม (Ambiguity Rules)</h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const curr = sysSettings.moral_rubric?.ambiguity_rules || [];
+                        setSysSettings({
+                          ...sysSettings,
+                          moral_rubric: {
+                            ...(sysSettings.moral_rubric || {}),
+                            ambiguity_rules: [...curr, '']
+                          }
+                        });
+                      }}
+                      className="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold transition inline-flex items-center gap-1"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span>เพิ่มกฎ</span>
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {(sysSettings.moral_rubric?.ambiguity_rules || []).map((rule, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={rule}
+                          onChange={(e) => {
+                            const updated = [...(sysSettings.moral_rubric?.ambiguity_rules || [])];
+                            updated[idx] = e.target.value;
+                            setSysSettings({
+                              ...sysSettings,
+                              moral_rubric: {
+                                ...(sysSettings.moral_rubric || {}),
+                                ambiguity_rules: updated
+                              }
+                            });
+                          }}
+                          placeholder="ระบุกฎการให้คะแนนกรณีพิเศษ..."
+                          className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = (sysSettings.moral_rubric?.ambiguity_rules || []).filter((_, i) => i !== idx);
+                            setSysSettings({
+                              ...sysSettings,
+                              moral_rubric: {
+                                ...(sysSettings.moral_rubric || {}),
+                                ambiguity_rules: updated
+                              }
+                            });
+                          }}
+                          title="ลบกฎนี้"
+                          className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-3 flex flex-wrap items-center justify-start gap-2.5 border-t border-slate-100">
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition"
+                  >
+                    {savingSettings ? 'กำลังบันทึก...' : 'บันทึก Moral Rubrics'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleResetAiDefaults('rubric')}
+                    disabled={savingSettings}
+                    className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold transition"
+                  >
+                    คืนค่าเริ่มต้น (Reset Rubrics)
+                  </button>
+                  {sysMeta.moral_rubric?.updated_by && (
+                    <span className="text-[11px] text-slate-400">
+                      แก้ไขล่าสุดโดย: {sysMeta.moral_rubric.updated_by}
+                    </span>
+                  )}
+                </div>
+              </form>
+              </>
             )}
 
             {/* SUBTAB 3: INGESTION & LLM BUDGET */}

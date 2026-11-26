@@ -7,15 +7,7 @@ from app.config import settings
 from app.analyzer.provinces import extract_province
 from app.analyzer.few_shot import get_dynamic_few_shot_prompt
 
-SYSTEM_PROMPT = """คุณคือ AI Agent ผู้เชี่ยวชาญการวิเคราะห์คุณธรรม 5 ด้านตามกรอบศูนย์คุณธรรม (องค์การมหาชน) ประเทศไทย
-คุณธรรม 5 ด้านประกอบด้วย:
-1. พอเพียง (sufficiency): พอประมาณ มีเหตุผล มีภูมิคุ้มกัน ไม่โลภ ไม่ฟุ้งเฟ้อ
-2. วินัย (discipline): ปฏิบัติตามกฎหมาย กติกา จรรยาบรรณ รับผิดชอบต่อสังคม
-3. สุจริต (integrity): ซื่อสัตย์ ยึดมั่นความถูกต้อง ต่อต้านคอร์รัปชัน ไม่รับสินบน
-4. จิตอาสา (public_mind): เสียสละเพื่อส่วนรวม บำเพ็ญประโยชน์ ช่วยเหลือผู้อื่น
-5. กตัญญู (gratitude): รู้คุณและตอบแทนบุญคุณต่อบิดามารดา ผู้มีพระคุณ ชุมชน และชาติ
-
-ให้ประเมินเนื้อหาข่าว/ข้อความที่ได้รับ และตอบกลับเป็น JSON เท่านั้นในรูปแบบนี้:
+SCORING_JSON_SCHEMA = """ให้ประเมินเนื้อหาข่าว/ข้อความที่ได้รับ และตอบกลับเป็น JSON เท่านั้นในรูปแบบนี้:
 {
   "sufficiency": {"relevant": true/false, "score": -2 ถึง +2 หรือ null, "rationale": "เหตุผลสั้นๆ"},
   "discipline": {"relevant": true/false, "score": -2 ถึง +2 หรือ null, "rationale": "เหตุผลสั้นๆ"},
@@ -25,19 +17,7 @@ SYSTEM_PROMPT = """คุณคือ AI Agent ผู้เชี่ยวชา
   "evidence_quote": "ข้อความสำคัญจากเนื้อหาที่สะท้อนประเด็น",
   "province": "ชื่อจังหวัดที่เกิดเหตุ (ถ้าไม่ระบุให้ตอบ 'ระดับประเทศ')",
   "flags": ["satire", "unverified", "opinion"] // ระบุถ้าเข้าข่าย หรือ [] ถ้าเป็นข่าวปกติ
-}
-
-เกณฑ์คะแนน (-2 ถึง +2):
-+2: ดีเด่นมาก/เป็นแบบอย่าง
-+1: เชิงบวก/ปฏิบัติดี
- 0: เป็นกลาง
--1: ฝ่าฝืน/บกพร่อง
--2: ร้ายแรง/สร้างความเสียหายอย่างมากต่อสังคม
-
-กฎกรณีพิเศษ:
-- ข่าวจับกุมเจ้าหน้าที่ทุจริต: integrity = -2 (สะท้อนการโกง), discipline = +1 หรือ +2 (สะท้อนการบังคับใช้กฎหมาย)
-- ถ้าไม่เกี่ยวกับด้านนั้น ให้ relevant = false และ score = null
-"""
+}"""
 
 async def evaluate_content_with_llm(title: str, text: str, session: Optional[AsyncSession] = None) -> Dict[str, Any]:
     """Calls LiteLLM with dynamic few-shot in-context learning to evaluate content against the 5 moral dimensions."""
@@ -48,9 +28,15 @@ async def evaluate_content_with_llm(title: str, text: str, session: Optional[Asy
         except Exception as e:
             print(f"[Scoring] Few-shot retrieval notice: {e}")
 
-    from app.settings_service import get_llm_config
+    from app.settings_service import get_llm_config, get_ai_prompts_and_rubric, format_rubric_text
 
     llm_cfg = await get_llm_config(session)
+    ai_cfg = await get_ai_prompts_and_rubric(session)
+    system_prompt = (
+        f"{ai_cfg['prompt_scoring']}\n\n"
+        f"{format_rubric_text(ai_cfg['moral_rubric'])}\n\n"
+        f"{SCORING_JSON_SCHEMA}"
+    )
     prompt = f"{few_shot_block}\nหัวข้อข่าวที่จะประเมิน: {title}\n\nเนื้อหา:\n{text[:1500]}"
     
     headers = {
@@ -61,7 +47,7 @@ async def evaluate_content_with_llm(title: str, text: str, session: Optional[Asy
     body = {
         "model": llm_cfg["model"],
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.1,

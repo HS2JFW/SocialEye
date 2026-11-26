@@ -104,10 +104,7 @@ async def generate_policy_report(
 {json.dumps(negative_samples[:4], ensure_ascii=False)}
 """
 
-    system_prompt = """คุณคือ "SocialEye Policy Advisor Agent" ผู้เชี่ยวชาญด้านการวิเคราะห์นโยบายคุณธรรมและการขับเคลื่อนสังคมของศูนย์คุณธรรม (องค์การมหาชน)
-หน้าที่ของคุณคือการร่าง "รายงานสรุปดัชนีคุณธรรมและข้อเสนอแนะเชิงนโยบาย" สำหรับผู้บริหารหน่วยงานภาครัฐและคณะกรรมการส่งเสริมคุณธรรมแห่งชาติ
-
-จงสร้างรายงานในรูปแบบ JSON อย่างเคร่งครัดตามโครงสร้างนี้:
+    advisor_json_schema = """จงสร้างรายงานในรูปแบบ JSON อย่างเคร่งครัดตามโครงสร้างนี้:
 {
   "title": "ชื่อหัวข้อรายงานทางการ เช่น รายงานสถานการณ์และข้อเสนอแนะเชิงนโยบายคุณธรรม 5 ด้าน ประจำสัปดาห์...",
   "executive_summary": "บทสรุปผู้บริหาร 2-3 ย่อหน้า สรุปภาพรวมคุณธรรม จุดเด่น จุดที่ต้องเฝ้าระวังอย่างเป็นทางการ",
@@ -152,8 +149,10 @@ async def generate_policy_report(
     regional_highlights = f"จังหวัดที่มีการรายงานข่าวสูงสุดได้แก่ กรุงเทพมหานคร และหัวเมืองภูมิภาค คิดเป็น {len(province_counts)} จังหวัดที่มีข้อมูลปรากฏในรอบการประเมินนี้"
 
     try:
-        from app.settings_service import get_llm_config
+        from app.settings_service import get_llm_config, get_ai_prompts_and_rubric
         llm_cfg = await get_llm_config(session)
+        ai_cfg = await get_ai_prompts_and_rubric(session)
+        system_prompt = f"{ai_cfg['prompt_advisor']}\n\n{advisor_json_schema}"
         async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=15.0)) as client:
             headers = {
                 "Authorization": f"Bearer {llm_cfg['api_key']}",

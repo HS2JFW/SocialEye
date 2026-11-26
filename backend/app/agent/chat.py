@@ -102,15 +102,20 @@ async def answer_moral_chat(
 =============================================================
 """
 
-    augmented_system_prompt = f"{CHAT_SYSTEM_PROMPT}\n\n{retrieved_block}"
+    from app.settings_service import get_llm_config, get_ai_prompts_and_rubric, format_rubric_text
+    llm_cfg = await get_llm_config(session)
+    ai_cfg = await get_ai_prompts_and_rubric(session)
+
+    augmented_system_prompt = (
+        f"{ai_cfg['prompt_chat']}\n\n"
+        f"{format_rubric_text(ai_cfg['moral_rubric'])}\n\n"
+        f"{retrieved_block}"
+    )
 
     # Build prompt messages
     llm_messages = [{"role": "system", "content": augmented_system_prompt}]
     for m in messages[-6:]:
         llm_messages.append({"role": m.get("role", "user"), "content": m.get("content", "")})
-
-    from app.settings_service import get_llm_config
-    llm_cfg = await get_llm_config(session)
 
     headers = {
         "Authorization": f"Bearer {llm_cfg['api_key']}",

@@ -18,6 +18,7 @@ from app.settings_service import (
     send_test_notification,
     get_llm_config,
     test_llm_connection,
+    reset_ai_defaults,
 )
 from app.analyzer.benchmark import compute_benchmark_metrics
 from app.data.seed_data import seed_golden_dataset
@@ -817,6 +818,17 @@ async def test_llm_gateway(
 ):
     """Tests connection to the configured LLM Endpoint and lists available models."""
     return await test_llm_connection(session)
+
+@router.post("/admin/settings/reset")
+async def reset_admin_ai_defaults(
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_admin),
+):
+    """Resets System Prompts and/or Moral Rubric to factory defaults."""
+    target = payload.get("target", "all")
+    result = await reset_ai_defaults(session, target=target, updated_by=user.display_identity)
+    return {"status": "success", "message": "คืนค่าเริ่มต้นเรียบร้อย", **result}
 
 @router.get("/admin/sources")
 async def list_data_sources(

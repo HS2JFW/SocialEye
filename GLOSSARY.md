@@ -35,3 +35,11 @@ _Avoid_: Notification Trigger, Threshold
 **Retention Policy**:
 The configurable number of days raw media content and embeddings are retained before automated PDPA purge, while preserving aggregated daily indices and published reports.
 _Avoid_: Cleanup Job, Expiry Setting
+
+**System Prompt**:
+The editable behavioral instructions and domain guidelines for an AI agent (Scoring, Chat, or Policy Advisor), separated from any locked output schema required by the system.
+_Avoid_: Prompt Template, Instruction String
+
+**Moral Rubric**:
+The structured evaluation criteria comprising the five virtue definitions, the five-level polarity scale (-2 to +2), and ambiguity rules used to score content consistently.
+_Avoid_: Scoring Guide, Evaluation Matrix

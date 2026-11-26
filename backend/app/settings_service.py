@@ -13,6 +13,52 @@ from app.db.session import AsyncSessionLocal
 
 SECRET_MASK = "••••••••"
 
+DEFAULT_PROMPT_SCORING = (
+    "คุณคือผู้เชี่ยวชาญการวิเคราะห์คุณธรรม 5 ด้านตามกรอบศูนย์คุณธรรม (องค์การมหาชน) ประเทศไทย\n"
+    "จงประเมินเนื้อหาข่าว/ข้อความที่ได้รับอย่างเป็นกลาง อ้างอิงหลักฐานจากข้อความจริง และปฏิบัติตามเกณฑ์ประเมิน (Moral Rubric) ด้านล่างอย่างเคร่งครัด"
+)
+
+DEFAULT_PROMPT_CHAT = (
+    'คุณคือผู้ช่วยวิเคราะห์ข้อมูล "SocialEye" ด้านดัชนีคุณธรรม 5 ด้านของประเทศไทย\n'
+    "พัฒนาขึ้นเพื่อสนับสนุนนักวิเคราะห์นโยบาย ผู้บริหารองค์กร และนักวิจัย ตามกรอบของศูนย์คุณธรรม (องค์การมหาชน)\n\n"
+    "เกณฑ์ดัชนี: สเกล 0.00 ถึง 5.00 โดยมี 2.50 เป็นค่าสมดุลกลาง (Neutral Baseline)\n\n"
+    "กฎในการตอบคำถาม:\n"
+    "1. ตอบอย่างกระชับ สุภาพ มีแบบแผนชัดเจน ใช้ภาษาทางการที่เข้าใจง่าย\n"
+    '2. ตอบโดยอ้างอิงข้อมูลจริงจาก "บริบทข้อมูลที่ค้นพบในระบบ (Retrieved Context)" ที่จัดเตรียมให้เท่านั้น\n'
+    "3. ต้องระบุแหล่งที่มาและจังหวัดประกอบการวิเคราะห์เสมอ\n"
+    '4. หากคำถามของผู้ใช้ไม่มีข้อมูลปรากฏในฐานข้อมูลระบบ ให้ตอบตรงไปตรงมาว่า "ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องกับประเด็นนี้ในฐานข้อมูลระบบ SocialEye ขณะนี้" ห้ามคาดเดาหรือแต่งเติมข้อมูลเด็ดขาด\n'
+    "5. เน้นการวิเคราะห์เชิงลึก เช่น ปัจจัยที่ส่งผลต่อคะแนน เหตุการณ์สำคัญ และข้อสังเกตเชิงนโยบาย"
+)
+
+DEFAULT_PROMPT_ADVISOR = (
+    'คุณคือผู้เชี่ยวชาญด้านการวิเคราะห์นโยบายคุณธรรมและการขับเคลื่อนสังคมของศูนย์คุณธรรม (องค์การมหาชน)\n'
+    'หน้าที่ของคุณคือการร่าง "รายงานสรุปดัชนีคุณธรรมและข้อเสนอแนะเชิงนโยบาย" สำหรับผู้บริหารหน่วยงานภาครัฐและคณะกรรมการส่งเสริมคุณธรรมแห่งชาติ\n'
+    "ให้เขียนบทสรุปผู้บริหารอย่างเป็นทางการ ชัดเจน อ้างอิงตัวเลขสถิติและเหตุการณ์จริงในพื้นที่ พร้อมเสนอแนะมาตรการที่นำไปปฏิบัติได้จริง"
+)
+
+DEFAULT_MORAL_RUBRIC: Dict[str, Any] = {
+    "dimensions": {
+        "sufficiency": "พอประมาณ มีเหตุผล มีภูมิคุ้มกัน ไม่โลภ ไม่ฟุ้งเฟ้อ ไม่เบียดเบียนตนเองและผู้อื่น",
+        "discipline": "เคารพกฎหมาย กติกา ระเบียบสังคม จรรยาบรรณ รับผิดชอบต่อหน้าที่และส่วนรวม",
+        "integrity": "ซื่อสัตย์สุจริต ยึดมั่นความถูกต้อง โปร่งใส ต่อต้านคอร์รัปชัน ไม่รับสินบน",
+        "public_mind": "เสียสละเพื่อส่วนรวม บำเพ็ญสาธารณประโยชน์ ช่วยเหลือผู้ประสบภัยและสังคม",
+        "gratitude": "รู้คุณและตอบแทนบุญคุณต่อบิดามารดา ครูอาจารย์ ผู้มีพระคุณ ชุมชน และชาติ",
+    },
+    "scale": {
+        "+2": "ดีเด่นมาก / เป็นแบบอย่างยอดเยี่ยมที่สร้างผลกระทบเชิงบวกกว้างขวาง",
+        "+1": "เชิงบวก / ปฏิบัติตามคุณธรรมและบทบาทหน้าที่อย่างเหมาะสม",
+        "0": "เป็นกลาง / รายงานข้อเท็จจริงทั่วไปโดยไม่มีนัยยะทางคุณธรรม",
+        "-1": "ฝ่าฝืน / บกพร่อง ขัดต่อกฎระเบียบหรือความเหมาะสมระดับทั่วไป",
+        "-2": "ร้ายแรง / บั่นทอนคุณธรรมอย่างรุนแรง สร้างความเสียหายต่อสังคม",
+    },
+    "ambiguity_rules": [
+        "ข่าวปราบปรามทุจริต / จับกุมเจ้าหน้าที่รับสินบน: สุจริต (integrity) = -2 หรือ -1 (สะท้อนการทุจริตที่มีอยู่จริง), วินัย (discipline) = +1 หรือ +2 (สะท้อนการบังคับใช้กฎหมายอย่างเข้มงวด)",
+        "ข่าวอุบัติเหตุจราจรจากความประมาท / เมาแล้วขับ: วินัย (discipline) = -2",
+        "ข่าวระดมทุนช่วยเหลือผู้ประสบภัย / กู้ภัย: จิตอาสา (public_mind) = +2 (หากโปร่งใส)",
+        "เนื้อหาเสียดสี (satire) หรือข้อมูลที่ยังไม่ยืนยัน (unverified): ให้ติดธง flags ที่เหมาะสม และถ้าไม่เกี่ยวกับมิตินั้นให้ relevant = false และ score = null",
+    ],
+}
+
 DEFAULT_SETTINGS: Dict[str, Dict[str, Any]] = {
     "ingest_interval_minutes": {"value": env_settings.INGEST_INTERVAL_MINUTES, "is_secret": False},
     "max_items_per_feed": {"value": env_settings.MAX_ITEMS_PER_FEED, "is_secret": False},
@@ -21,6 +67,10 @@ DEFAULT_SETTINGS: Dict[str, Dict[str, Any]] = {
     "llm_api_key": {"value": env_settings.LITELLM_API_KEY, "is_secret": True},
     "llm_model": {"value": env_settings.LITELLM_MODEL, "is_secret": False},
     "llm_embedding_model": {"value": env_settings.LITELLM_EMBEDDING_MODEL, "is_secret": False},
+    "prompt_scoring": {"value": DEFAULT_PROMPT_SCORING, "is_secret": False},
+    "prompt_chat": {"value": DEFAULT_PROMPT_CHAT, "is_secret": False},
+    "prompt_advisor": {"value": DEFAULT_PROMPT_ADVISOR, "is_secret": False},
+    "moral_rubric": {"value": DEFAULT_MORAL_RUBRIC, "is_secret": False},
     "alert_shift_threshold": {"value": 0.30, "is_secret": False},
     "alert_cooldown_hours": {"value": 24, "is_secret": False},
     "alert_email_enabled": {"value": False, "is_secret": False},
@@ -247,3 +297,76 @@ async def test_llm_connection(session: AsyncSession) -> Dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "error", "message": f"ไม่สามารถเชื่อมต่อ Gateway ได้: {exc}", "models": []}
+
+
+async def get_ai_prompts_and_rubric(session: AsyncSession | None = None) -> Dict[str, Any]:
+    """Loads live System Prompts and Moral Rubric from DB with default fallback."""
+    async def _load(s: AsyncSession) -> Dict[str, Any]:
+        raw = await get_all_settings(s, mask_secrets=False)
+        cfg = raw["settings"]
+        rubric = cfg.get("moral_rubric")
+        if not isinstance(rubric, dict):
+            rubric = DEFAULT_MORAL_RUBRIC
+        return {
+            "prompt_scoring": cfg.get("prompt_scoring") or DEFAULT_PROMPT_SCORING,
+            "prompt_chat": cfg.get("prompt_chat") or DEFAULT_PROMPT_CHAT,
+            "prompt_advisor": cfg.get("prompt_advisor") or DEFAULT_PROMPT_ADVISOR,
+            "moral_rubric": rubric,
+        }
+
+    try:
+        if session is not None:
+            return await _load(session)
+        async with AsyncSessionLocal() as own_session:
+            return await _load(own_session)
+    except Exception:
+        return {
+            "prompt_scoring": DEFAULT_PROMPT_SCORING,
+            "prompt_chat": DEFAULT_PROMPT_CHAT,
+            "prompt_advisor": DEFAULT_PROMPT_ADVISOR,
+            "moral_rubric": DEFAULT_MORAL_RUBRIC,
+        }
+
+
+def format_rubric_text(rubric: Dict[str, Any]) -> str:
+    dims = rubric.get("dimensions", {})
+    scale = rubric.get("scale", {})
+    rules = rubric.get("ambiguity_rules", [])
+
+    dim_names = {
+        "sufficiency": "1. พอเพียง (sufficiency)",
+        "discipline": "2. วินัย (discipline)",
+        "integrity": "3. สุจริต (integrity)",
+        "public_mind": "4. จิตอาสา (public_mind)",
+        "gratitude": "5. กตัญญู (gratitude)",
+    }
+    lines = ["คุณธรรม 5 ด้านประกอบด้วย:"]
+    for k, label in dim_names.items():
+        lines.append(f"{label}: {dims.get(k, '')}")
+
+    lines.append("\nเกณฑ์คะแนน (-2 ถึง +2):")
+    for level in ["+2", "+1", "0", "-1", "-2"]:
+        lines.append(f"{level}: {scale.get(level, '')}")
+
+    if rules:
+        lines.append("\nกฎกรณีพิเศษ / เคสกำกวม:")
+        for r in rules:
+            if str(r).strip():
+                lines.append(f"- {str(r).strip()}")
+
+    return "\n".join(lines)
+
+
+async def reset_ai_defaults(session: AsyncSession, target: str, updated_by: str) -> Dict[str, Any]:
+    """Resets System Prompts and/or Moral Rubric back to defaults."""
+    updates: Dict[str, Any] = {}
+    if target in ("prompts", "all"):
+        updates["prompt_scoring"] = DEFAULT_PROMPT_SCORING
+        updates["prompt_chat"] = DEFAULT_PROMPT_CHAT
+        updates["prompt_advisor"] = DEFAULT_PROMPT_ADVISOR
+    if target in ("rubric", "all"):
+        updates["moral_rubric"] = DEFAULT_MORAL_RUBRIC
+
+    if not updates:
+        return await get_all_settings(session, mask_secrets=True)
+    return await update_settings(session, updates, updated_by=updated_by)
