@@ -9,6 +9,7 @@ from app.analyzer.aggregator import calculate_daily_indices
 from app.analyzer.alerts import check_for_alerts
 from app.ingest.foreign_filter import is_foreign_only_news
 from app.rag.graph import graph_manager
+from app.system_monitor import task_tracker
 
 RSS_FEEDS = [
     # 1. สำนักข่าวอิศรา (สืบสวนทุจริต คอร์รัปชัน และความโปร่งใสภาครัฐ)
@@ -75,120 +76,127 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
     else:
         feeds_to_run = [{"source": f["source"], "url": f["url"], "keywords": []} for f in RSS_FEEDS]
 
-    for feed_info in feeds_to_run:
-        try:
-            feed = feedparser.parse(feed_info["url"], agent=headers_agent)
-            items = feed.entries[:max_items_per_feed]
-            kw_list = [str(k).strip().lower() for k in (feed_info.get("keywords") or []) if str(k).strip()]
-            
-            for item in items:
-                link = getattr(item, "link", None)
-                title = getattr(item, "title", "").strip()
-                summary = getattr(item, "summary", "") or getattr(item, "description", "")
-                
-                if not link or not title:
-                    continue
+    task_id = task_tracker.start_task("rss_ingest", "กำลังดึงและวิเคราะห์ข่าวจากแหล่งข้อมูล RSS", total=len(feeds_to_run))
+    try:
+        for feed_idx, feed_info in enumerate(feeds_to_run, start=1):
+            task_tracker.update_task(
+                task_id,
+                message=f"กำลังดึงข่าว ({feed_idx}/{len(feeds_to_run)}): {feed_info['source']}",
+                current=feed_idx,
+                total=len(feeds_to_run),
+            )
+            try:
+                feed = feedparser.parse(feed_info["url"], agent=headers_agent)
+                items = feed.entries[:max_items_per_feed]
+                kw_list = [str(k).strip().lower() for k in (feed_info.get("keywords") or []) if str(k).strip()]
 
-                if kw_list:
-                    combined = f"{title} {summary}".lower()
-                    if not any(kw in combined for kw in kw_list):
+                for item in items:
+                    link = getattr(item, "link", None)
+                    title = getattr(item, "title", "").strip()
+                    summary = getattr(item, "summary", "") or getattr(item, "description", "")
+
+                    if not link or not title:
                         continue
 
-                # Check if already exists
-                stmt = select(Content).where(Content.url == link)
-                existing = (await session.execute(stmt)).scalar_one_or_none()
-                if existing:
-                    continue
+                    if kw_list:
+                        combined = f"{title} {summary}".lower()
+                        if not any(kw in combined for kw in kw_list):
+                            continue
 
-                # Filter out foreign-only news before LLM evaluation
-                if is_foreign_only_news(link, title, summary):
-                    continue
+                    stmt = select(Content).where(Content.url == link)
+                    existing = (await session.execute(stmt)).scalar_one_or_none()
+                    if existing:
+                        continue
 
-                # Clean summary / text
-                text_content = f"{title}. {summary}"
+                    if is_foreign_only_news(link, title, summary):
+                        continue
 
-                # Evaluate with LLM (with dynamic few-shot)
-                eval_res = await evaluate_content_with_llm(title, text_content, session=session)
-                if eval_res.get("is_thai_domestic") is False:
-                    continue
+                    text_content = f"{title}. {summary}"
 
-                pub_time = datetime.utcnow()
-                if getattr(item, "published_parsed", None):
-                    try:
-                        pub_time = datetime(*item.published_parsed[:6])
-                    except Exception:
-                        pub_time = datetime.utcnow()
+                    eval_res = await evaluate_content_with_llm(title, text_content, session=session)
+                    if eval_res.get("is_thai_domestic") is False:
+                        continue
 
-                content_obj = Content(
-                    url=link,
-                    title=title,
-                    text=text_content,
-                    source=feed_info["source"],
-                    published_at=pub_time,
-                    reach=1000
-                )
-                session.add(content_obj)
-                await session.flush()
-                new_contents_count += 1
-                
-                orig_scores = {
-                    "sufficiency": eval_res.get("sufficiency", {}).get("score"),
-                    "discipline": eval_res.get("discipline", {}).get("score"),
-                    "integrity": eval_res.get("integrity", {}).get("score"),
-                    "public_mind": eval_res.get("public_mind", {}).get("score"),
-                    "gratitude": eval_res.get("gratitude", {}).get("score"),
-                }
+                    pub_time = datetime.utcnow()
+                    if getattr(item, "published_parsed", None):
+                        try:
+                            pub_time = datetime(*item.published_parsed[:6])
+                        except Exception:
+                            pub_time = datetime.utcnow()
 
-                eval_obj = Evaluation(
-                    content_id=content_obj.id,
-                    sufficiency_score=orig_scores["sufficiency"],
-                    discipline_score=orig_scores["discipline"],
-                    integrity_score=orig_scores["integrity"],
-                    public_mind_score=orig_scores["public_mind"],
-                    gratitude_score=orig_scores["gratitude"],
-                    evidence_quote=eval_res.get("evidence_quote"),
-                    province=eval_res.get("province", "ระดับประเทศ"),
-                    flags=eval_res.get("flags", []),
-                    rationale=json_rationales(eval_res),
-                    original_ai_scores=orig_scores,
-                    news_summary=eval_res.get("news_summary"),
-                    overall_virtues=eval_res.get("overall_virtues"),
-                    entity_evaluations=eval_res.get("entity_evaluations"),
-                    evaluated_at=datetime.utcnow()
-                )
-                session.add(eval_obj)
-                evaluated_count += 1
-
-                # Sync to Knowledge Graph (Neo4j)
-                try:
-                    await graph_manager.sync_evaluation_to_graph(
-                        content_id=content_obj.id,
+                    content_obj = Content(
+                        url=link,
                         title=title,
                         text=text_content,
-                        province=eval_obj.province,
-                        scores=orig_scores,
-                        evidence_quote=eval_obj.evidence_quote,
-                        rationale=eval_obj.rationale
+                        source=feed_info["source"],
+                        published_at=pub_time,
+                        reach=1000
                     )
-                except Exception as ge:
-                    print(f"[Ingest] Graph sync notice: {ge}")
+                    session.add(content_obj)
+                    await session.flush()
+                    new_contents_count += 1
 
-            await session.commit()
-        except Exception as e:
-            # Continue on individual feed failure
-            print(f"Error fetching feed {feed_info['source']}: {e}")
+                    orig_scores = {
+                        "sufficiency": eval_res.get("sufficiency", {}).get("score"),
+                        "discipline": eval_res.get("discipline", {}).get("score"),
+                        "integrity": eval_res.get("integrity", {}).get("score"),
+                        "public_mind": eval_res.get("public_mind", {}).get("score"),
+                        "gratitude": eval_res.get("gratitude", {}).get("score"),
+                    }
 
-    # Recalculate daily indices
-    await calculate_daily_indices(session)
-    
-    # Check alert rules
-    alerts = await check_for_alerts(session)
+                    eval_obj = Evaluation(
+                        content_id=content_obj.id,
+                        sufficiency_score=orig_scores["sufficiency"],
+                        discipline_score=orig_scores["discipline"],
+                        integrity_score=orig_scores["integrity"],
+                        public_mind_score=orig_scores["public_mind"],
+                        gratitude_score=orig_scores["gratitude"],
+                        evidence_quote=eval_res.get("evidence_quote"),
+                        province=eval_res.get("province", "ระดับประเทศ"),
+                        flags=eval_res.get("flags", []),
+                        rationale=json_rationales(eval_res),
+                        original_ai_scores=orig_scores,
+                        news_summary=eval_res.get("news_summary"),
+                        overall_virtues=eval_res.get("overall_virtues"),
+                        entity_evaluations=eval_res.get("entity_evaluations"),
+                        evaluated_at=datetime.utcnow()
+                    )
+                    session.add(eval_obj)
+                    evaluated_count += 1
 
-    return {
-        "new_contents": new_contents_count,
-        "evaluated": evaluated_count,
-        "new_alerts": len(alerts)
-    }
+                    try:
+                        await graph_manager.sync_evaluation_to_graph(
+                            content_id=content_obj.id,
+                            title=title,
+                            text=text_content,
+                            province=eval_obj.province,
+                            scores=orig_scores,
+                            evidence_quote=eval_obj.evidence_quote,
+                            rationale=eval_obj.rationale
+                        )
+                    except Exception as ge:
+                        print(f"[Ingest] Graph sync notice: {ge}")
+
+                await session.commit()
+            except Exception as e:
+                print(f"Error fetching feed {feed_info['source']}: {e}")
+
+        task_tracker.update_task(task_id, message="กำลังคำนวณดัชนีคุณธรรมและตรวจสอบการแจ้งเตือน...")
+        await calculate_daily_indices(session)
+        alerts = await check_for_alerts(session)
+        task_tracker.finish_task(
+            task_id,
+            f"ดึงและวิเคราะห์ข่าวสำเร็จ ({evaluated_count} ข่าวใหม่, แจ้งเตือน {len(alerts)} รายการ)",
+            status="completed",
+        )
+        return {
+            "new_contents": new_contents_count,
+            "evaluated": evaluated_count,
+            "new_alerts": len(alerts)
+        }
+    except Exception as exc:
+        task_tracker.finish_task(task_id, f"ดึงข้อมูลข่าวล้มเหลว: {exc}", status="failed")
+        raise
 
 def json_rationales(eval_res: Dict[str, Any]) -> str:
     parts = []

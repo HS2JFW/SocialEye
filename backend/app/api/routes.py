@@ -4,10 +4,11 @@ import csv
 import io
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, File, UploadFile, Response
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select, func, desc, and_
+from sqlalchemy import select, func, desc, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db, AsyncSessionLocal
-from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample, PolicyReport, DataSource
+from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample, PolicyReport, DataSource, AuditLog
+from app.system_monitor import task_tracker, record_audit_log
 from app.analyzer.aggregator import DIMENSIONS, extract_eval_dimension_scores, score_to_5_scale
 from app.analyzer.alerts import check_for_alerts
 from app.ingest.rss import run_ingestion_pipeline
@@ -55,8 +56,15 @@ async def get_auth_config():
     }
 
 @router.get("/auth/me")
-async def get_authenticated_user(user: UserContext = Depends(get_current_user)):
+async def get_authenticated_user(
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     """Returns the authenticated user's profile and canonical SocialEye role."""
+    await record_audit_log(
+        session, user, "auth.session_verified", "auth", user.sub,
+        summary=f"เข้าสู่ระบบด้วยสิทธิ์ {user.role.value}", dedupe_minutes=30
+    )
     return {
         "sub": user.sub,
         "email": user.email,
@@ -66,6 +74,11 @@ async def get_authenticated_user(user: UserContext = Depends(get_current_user)):
         "groups": user.groups,
         "auth_enabled": settings.is_auth_enforced,
     }
+
+@router.get("/system/status")
+async def get_system_live_status(_: UserContext = Depends(require_viewer)):
+    """Returns currently running and recent background tasks for live UI status."""
+    return task_tracker.get_status_snapshot()
 
 @router.get("/indices/overview")
 async def get_indices_overview(
@@ -316,6 +329,11 @@ async def review_content_label(
         promoted_to_golden = True
 
     await session.commit()
+    await record_audit_log(
+        session, user, "content.label", "evaluation", str(evaluation_id),
+        summary=f"ตรวจสอบ/ปรับแก้คะแนนข่าว ID {evaluation_id}" + (" (นำเข้า Golden Set)" if promoted_to_golden else ""),
+        details={"promoted_to_golden": promoted_to_golden, "province": evaluation.province},
+    )
 
     return {
         "status": "success",
@@ -468,6 +486,10 @@ async def create_golden_sample(
     session.add(sample)
     await session.commit()
     await session.refresh(sample)
+    await record_audit_log(
+        session, user, "golden_sample.create", "golden_sample", str(sample.id),
+        summary=f"เพิ่ม Golden Sample: {sample.title[:60]}",
+    )
 
     return {"status": "success", "id": sample.id, "message": "เพิ่มตัวอย่างเข้าชุดข้อมูลทองคำเรียบร้อย"}
 
@@ -475,7 +497,7 @@ async def create_golden_sample(
 async def delete_golden_sample(
     sample_id: int,
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_analyst),
+    user: UserContext = Depends(require_analyst),
 ):
     """Deletes a Golden Sample by ID."""
     stmt = select(GoldenSample).where(GoldenSample.id == sample_id)
@@ -485,6 +507,10 @@ async def delete_golden_sample(
 
     await session.delete(sample)
     await session.commit()
+    await record_audit_log(
+        session, user, "golden_sample.delete", "golden_sample", str(sample_id),
+        summary=f"ลบ Golden Sample ID {sample_id}",
+    )
     return {"status": "success", "message": "ลบตัวอย่างเรียบร้อย"}
 
 @router.post("/quality/seed")
@@ -556,10 +582,15 @@ async def _bg_run_ingest():
 @router.post("/ingest/trigger")
 async def trigger_manual_ingest(
     background_tasks: BackgroundTasks,
-    _: UserContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_admin),
 ):
     """Manually triggers an ingestion and AI evaluation cycle in the background."""
     background_tasks.add_task(_bg_run_ingest)
+    await record_audit_log(
+        session, user, "ingest.trigger", "ingestion", "rss",
+        summary="สั่งดึงและวิเคราะห์ข่าวจาก RSS ในพื้นหลัง",
+    )
     return {"status": "success", "message": "เริ่มกระบวนการดึงและวิเคราะห์ข่าวในพื้นหลังแล้ว ระบบจะอัปเดตข้อมูลอัตโนมัติ"}
 
 # =============================================================================
@@ -583,12 +614,23 @@ async def get_reports_list(
 async def create_policy_report(
     payload: dict,
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_analyst),
+    user: UserContext = Depends(require_analyst),
 ):
     """Triggers the Policy Advisor Agent to synthesize a new policy report."""
     report_type = payload.get("report_type", "weekly")
     days = int(payload.get("days", 7 if report_type == "weekly" else 30))
-    report = await generate_policy_report(session, report_type=report_type, days=days)
+    tid = task_tracker.start_task("report_generate", f"กำลังร่างรายงานเชิงนโยบาย ({report_type})")
+    try:
+        report = await generate_policy_report(session, report_type=report_type, days=days)
+        task_tracker.finish_task(tid, f"สร้างรายงานสำเร็จ: {report.title[:50]}", status="completed")
+    except Exception as exc:
+        task_tracker.finish_task(tid, f"สร้างรายงานไม่สำเร็จ: {exc}", status="failed")
+        raise
+    await record_audit_log(
+        session, user, "report.generate", "policy_report", str(report.id),
+        summary=f"สร้างร่างรายงานนโยบาย: {report.title[:60]}",
+        details={"report_type": report_type, "days": days},
+    )
     return {
         "status": "success",
         "message": "สร้างรายงานข้อเสนอแนะเชิงนโยบายสำเร็จ",
@@ -644,6 +686,11 @@ async def review_and_publish_report(
     
     await session.commit()
     await session.refresh(report)
+    await record_audit_log(
+        session, user, "report.review", "policy_report", str(report_id),
+        summary=f"อัปเดตสถานะรายงานเป็น {report.status}: {report.title[:60]}",
+        details={"status": report.status},
+    )
     return {"status": "success", "message": "อัปเดตและเผยแพร่รายงานสำเร็จ", "report": report}
 
 @router.get("/reports/export/csv")
@@ -728,29 +775,60 @@ async def export_provinces_csv(
 async def upload_wisesight_file(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_admin),
+    user: UserContext = Depends(require_admin),
 ):
     """Uploads and ingests a Wisesight Trend CSV or JSON file into SocialEye."""
     contents = await file.read()
-    res = await import_wisesight_data(session, contents, file.filename or "wisesight.csv")
+    tid = task_tracker.start_task("wisesight_import", f"กำลังนำเข้าข้อมูล Wisesight ({file.filename})")
+    try:
+        res = await import_wisesight_data(session, contents, file.filename or "wisesight.csv")
+        task_tracker.finish_task(tid, f"นำเข้า Wisesight สำเร็จ ({res.get('imported_items', 0)} รายการ)", status="completed")
+    except Exception as exc:
+        task_tracker.finish_task(tid, f"นำเข้า Wisesight ล้มเหลว: {exc}", status="failed")
+        raise
+    await record_audit_log(
+        session, user, "ingest.wisesight", "ingestion", file.filename or "wisesight",
+        summary=f"นำเข้าไฟล์ Wisesight: {file.filename}",
+        details=res,
+    )
     return res
 
 @router.post("/ingest/youtube")
 async def trigger_youtube_feed(
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_admin),
+    user: UserContext = Depends(require_admin),
 ):
     """Ingests latest video news from Thai news YouTube channels."""
-    res = await run_youtube_connector(session)
+    tid = task_tracker.start_task("youtube_ingest", "กำลังดึงคลิปข่าวล่าสุดจาก YouTube")
+    try:
+        res = await run_youtube_connector(session)
+        task_tracker.finish_task(tid, f"ดึงคลิป YouTube สำเร็จ ({res.get('new_videos_ingested', 0)} รายการ)", status="completed")
+    except Exception as exc:
+        task_tracker.finish_task(tid, f"ดึงคลิป YouTube ล้มเหลว: {exc}", status="failed")
+        raise
+    await record_audit_log(
+        session, user, "ingest.youtube", "ingestion", "youtube",
+        summary="สั่งดึงคลิปข่าวจาก YouTube", details=res,
+    )
     return res
 
 @router.post("/ingest/pantip")
 async def trigger_pantip_scan(
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_admin),
+    user: UserContext = Depends(require_admin),
 ):
     """Triggers Pantip public community discussions scanner."""
-    res = await run_pantip_connector(session)
+    tid = task_tracker.start_task("pantip_ingest", "กำลังตรวจสอบกระทู้สาธารณะจาก Pantip")
+    try:
+        res = await run_pantip_connector(session)
+        task_tracker.finish_task(tid, f"ตรวจสอบ Pantip สำเร็จ ({res.get('new_topics_ingested', 0)} กระทู้)", status="completed")
+    except Exception as exc:
+        task_tracker.finish_task(tid, f"ตรวจสอบ Pantip ล้มเหลว: {exc}", status="failed")
+        raise
+    await record_audit_log(
+        session, user, "ingest.pantip", "ingestion", "pantip",
+        summary="สั่งสแกนกระทู้ Pantip", details=res,
+    )
     return res
 
 @router.get("/admin/backup")
@@ -761,11 +839,16 @@ async def get_backup_status(_: UserContext = Depends(require_admin)):
 @router.post("/admin/retention/run")
 async def trigger_retention_cleanup(
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_admin),
+    user: UserContext = Depends(require_admin),
 ):
     """Runs PDPA retention cleanup on raw data using configured retention_days."""
     days = int(await get_setting_value(session, "retention_days", 90))
     res = await clean_expired_content(session, retention_days=days)
+    await record_audit_log(
+        session, user, "pdpa.retention_run", "retention", str(days),
+        summary=res.get("message", "รัน PDPA Retention Cleanup"),
+        details={"retention_days": days, "deleted": res.get("expired_items_deleted", 0)},
+    )
     return res
 
 @router.get("/admin/settings")
@@ -801,6 +884,11 @@ async def update_admin_settings(
             reschedule_ingest_job(int(updates["ingest_interval_minutes"]))
         except Exception:
             pass
+    await record_audit_log(
+        session, user, "settings.update", "system_settings", "global",
+        summary=f"อัปเดตการตั้งค่าระบบ ({', '.join(list(updates.keys())[:5])})",
+        details=updates,
+    )
     return {"status": "success", "message": "บันทึกการตั้งค่าระบบเรียบร้อย", **result}
 
 @router.post("/admin/alerts/test")
@@ -834,6 +922,7 @@ async def reset_admin_ai_defaults(
 
 async def _bg_reevaluate_recent(limit: int = 30):
     from app.analyzer.aggregator import calculate_daily_indices
+    task_id = task_tracker.start_task("reevaluate", f"กำลังประเมินข่าวล่าสุด {limit} รายการซ้ำด้วย Rubrics ใหม่", total=limit)
     try:
         async with AsyncSessionLocal() as session:
             stmt = (
@@ -844,13 +933,26 @@ async def _bg_reevaluate_recent(limit: int = 30):
                 .limit(limit)
             )
             rows = (await session.execute(stmt)).all()
-            for content, ev in rows:
+            total_rows = len(rows)
+            removed_foreign = 0
+            updated_count = 0
+            task_tracker.update_task(task_id, total=total_rows)
+
+            for idx, (content, ev) in enumerate(rows, start=1):
+                task_tracker.update_task(
+                    task_id,
+                    message=f"กำลังประเมินข่าวซ้ำ ({idx}/{total_rows}): {content.title[:40]}",
+                    current=idx,
+                    total=total_rows,
+                )
                 if is_foreign_only_news(content.url, content.title, content.text):
                     await session.delete(content)
+                    removed_foreign += 1
                     continue
                 eval_res = await evaluate_content_with_llm(content.title, content.text, session=session)
                 if eval_res.get("is_thai_domestic") is False:
                     await session.delete(content)
+                    removed_foreign += 1
                     continue
                 orig_scores = {
                     "sufficiency": eval_res.get("sufficiency", {}).get("score"),
@@ -872,21 +974,34 @@ async def _bg_reevaluate_recent(limit: int = 30):
                 ev.overall_virtues = eval_res.get("overall_virtues")
                 ev.entity_evaluations = eval_res.get("entity_evaluations")
                 ev.evaluated_at = datetime.utcnow()
+                updated_count += 1
             await session.commit()
             await calculate_daily_indices(session)
             await check_for_alerts(session)
+            task_tracker.finish_task(
+                task_id,
+                f"ประเมินข่าวซ้ำสำเร็จ {updated_count} รายการ (คัดกรองข่าวต่างประเทศออก {removed_foreign} รายการ)",
+                status="completed",
+            )
     except Exception as e:
+        task_tracker.finish_task(task_id, f"ประเมินข่าวซ้ำล้มเหลว: {e}", status="failed")
         print(f"Background re-evaluate error: {e}")
 
 @router.post("/admin/reevaluate")
 async def trigger_reevaluate_recent(
     background_tasks: BackgroundTasks,
     limit: int = 30,
-    _: UserContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_admin),
 ):
     """Re-evaluates recent unreviewed news items using the latest Rubrics v2 and foreign-news filter."""
     safe_limit = max(1, min(100, int(limit)))
     background_tasks.add_task(_bg_reevaluate_recent, safe_limit)
+    await record_audit_log(
+        session, user, "system.reevaluate", "evaluation", "batch",
+        summary=f"สั่งประเมินข่าวล่าสุด {safe_limit} รายการซ้ำด้วย Rubrics ใหม่",
+        details={"limit": safe_limit},
+    )
     return {
         "status": "success",
         "message": f"เริ่มประเมินข่าวล่าสุด {safe_limit} รายการซ้ำด้วย Rubrics ใหม่และคัดกรองข่าวต่างประเทศในพื้นหลังแล้ว",
@@ -943,6 +1058,11 @@ async def create_data_source(
     session.add(src)
     await session.commit()
     await session.refresh(src)
+    await record_audit_log(
+        session, user, "data_source.create", "data_source", str(src.id),
+        summary=f"เพิ่มแหล่งข้อมูล: {src.name}",
+        details={"url": src.url, "source_type": src.source_type},
+    )
     return {"status": "success", "id": src.id, "message": "เพิ่มแหล่งข้อมูลเรียบร้อย"}
 
 @router.patch("/admin/sources/{source_id}")
@@ -970,18 +1090,104 @@ async def update_data_source(
         src.keywords = raw_kw
     src.updated_by = user.display_identity
     await session.commit()
+    await record_audit_log(
+        session, user, "data_source.update", "data_source", str(source_id),
+        summary=f"แก้ไขแหล่งข้อมูล: {src.name} ({'เปิด' if src.is_enabled else 'ปิด'})",
+        details={"is_enabled": src.is_enabled},
+    )
     return {"status": "success", "message": "อัปเดตแหล่งข้อมูลเรียบร้อย"}
 
 @router.delete("/admin/sources/{source_id}")
 async def delete_data_source(
     source_id: int,
     session: AsyncSession = Depends(get_db),
-    _: UserContext = Depends(require_admin),
+    user: UserContext = Depends(require_admin),
 ):
     """Deletes a data source."""
     src = await session.get(DataSource, source_id)
     if not src:
         raise HTTPException(status_code=404, detail="Data source not found")
+    name_copy = src.name
     await session.delete(src)
     await session.commit()
+    await record_audit_log(
+        session, user, "data_source.delete", "data_source", str(source_id),
+        summary=f"ลบแหล่งข้อมูล: {name_copy}",
+    )
     return {"status": "success", "message": "ลบแหล่งข้อมูลเรียบร้อย"}
+
+
+@router.get("/admin/audit-logs")
+async def list_audit_logs(
+    resource_type: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Lists chronological Audit Log entries for security and compliance review."""
+    stmt = select(AuditLog)
+    if resource_type and resource_type != "all":
+        stmt = stmt.where(AuditLog.resource_type == resource_type)
+    if q and q.strip():
+        kw = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                AuditLog.actor_name.ilike(kw),
+                AuditLog.actor_email.ilike(kw),
+                AuditLog.action.ilike(kw),
+                AuditLog.summary.ilike(kw),
+            )
+        )
+    stmt = stmt.order_by(desc(AuditLog.created_at), desc(AuditLog.id)).offset(offset).limit(min(200, limit))
+    rows = (await session.execute(stmt)).scalars().all()
+    return {
+        "logs": [
+            {
+                "id": r.id,
+                "actor_name": r.actor_name,
+                "actor_email": r.actor_email,
+                "actor_role": r.actor_role,
+                "action": r.action,
+                "resource_type": r.resource_type,
+                "resource_id": r.resource_id,
+                "summary": r.summary,
+                "details": r.details,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/admin/audit-logs/export/csv")
+async def export_audit_logs_csv(
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_admin),
+):
+    """Exports up to 1,000 latest Audit Log entries as UTF-8 BOM CSV for Excel."""
+    stmt = select(AuditLog).order_by(desc(AuditLog.created_at), desc(AuditLog.id)).limit(1000)
+    rows = (await session.execute(stmt)).scalars().all()
+
+    output = io.StringIO()
+    output.write("\ufeff")
+    writer = csv.writer(output)
+    writer.writerow(["เวลา (UTC)", "ผู้ดำเนินการ", "อีเมล", "บทบาท", "การกระทำ (Action)", "ประเภททรัพยากร", "รหัสทรัพยากร", "สรุปรายละเอียด"])
+    for r in rows:
+        writer.writerow([
+            r.created_at.isoformat() if r.created_at else "",
+            r.actor_name or "",
+            r.actor_email or "",
+            r.actor_role or "",
+            r.action or "",
+            r.resource_type or "",
+            r.resource_id or "",
+            r.summary or "",
+        ])
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="socialeye_audit_logs.csv"'},
+    )

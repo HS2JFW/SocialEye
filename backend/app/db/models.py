@@ -155,3 +155,19 @@ class DataSource(Base):
     updated_by = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    actor_sub = Column(String(200), nullable=True, index=True)
+    actor_name = Column(String(200), nullable=True)
+    actor_email = Column(String(200), nullable=True)
+    actor_role = Column(String(50), nullable=True, index=True)
+    action = Column(String(100), nullable=False, index=True)
+    resource_type = Column(String(100), nullable=False, index=True)
+    resource_id = Column(String(200), nullable=True)
+    summary = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

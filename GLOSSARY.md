@@ -51,3 +51,11 @@ _Avoid_: Edge Case Rule, Special Rule
 **Entity Evaluation**:
 The per-actor moral assessment extracted from a news item, recording an individual, group, or organization's role, virtue scores, verbatim evidence, and reasoning without canceling out other actors.
 _Avoid_: Actor Score, Character Rating
+
+**Audit Log**:
+An immutable chronological record of security-relevant user actions, configuration changes, and administrative commands, retained separately from raw media content for compliance auditing.
+_Avoid_: Activity Feed, History Log
+
+**System Task**:
+A tracked background operation (such as RSS ingestion, re-evaluation, report generation, or PDPA retention) reporting live progress and completion status to the interface.
+_Avoid_: Background Job, Worker Process

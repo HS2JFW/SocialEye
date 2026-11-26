@@ -142,6 +142,46 @@ export default function App() {
   const [activeRubricDim, setActiveRubricDim] = useState('sufficiency');
   const [reevaluating, setReevaluating] = useState(false);
   const [newSourceName, setNewSourceName] = useState('');
+
+  // Live System Status & Audit Log States
+  const [systemStatus, setSystemStatus] = useState({ is_running: false, active_task: null, last_completed: null, recent_tasks: [] });
+  const wasRunningRef = useRef(false);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditTypeFilter, setAuditTypeFilter] = useState('all');
+  const [auditSearch, setAuditSearch] = useState('');
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
+  const fetchSystemStatus = async () => {
+    try {
+      const res = await authFetch('/api/system/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (wasRunningRef.current && !data.is_running) {
+        fetchData();
+        if (currentUser?.role === 'admin') fetchAdminData();
+      }
+      wasRunningRef.current = Boolean(data.is_running);
+      setSystemStatus(data);
+    } catch {
+      // Ignore transient network polling errors
+    }
+  };
+
+  const fetchAuditLogs = async (typeFilter = auditTypeFilter, searchQ = auditSearch) => {
+    try {
+      setLoadingAudit(true);
+      const params = new URLSearchParams({ limit: '60' });
+      if (typeFilter && typeFilter !== 'all') params.set('resource_type', typeFilter);
+      if (searchQ && searchQ.trim()) params.set('q', searchQ.trim());
+      const res = await authFetch(`/api/admin/audit-logs?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogs(data.logs || []);
+      }
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceKeywords, setNewSourceKeywords] = useState('');
   const [addingSource, setAddingSource] = useState(false);
@@ -249,6 +289,7 @@ export default function App() {
       const res = await authFetch('/api/admin/reevaluate?limit=30', { method: 'POST' });
       const data = await res.json();
       setSettingsMsg(data.message || 'เริ่มประเมินข่าวล่าสุดซ้ำในพื้นหลังแล้ว');
+      fetchSystemStatus();
     } catch {
       setSettingsMsg('เกิดข้อผิดพลาดในการสั่งประเมินข่าวซ้ำ');
     } finally {
@@ -415,6 +456,14 @@ export default function App() {
     };
     initAuth();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchSystemStatus();
+    const intervalMs = systemStatus.is_running ? 3000 : 25000;
+    const timer = setInterval(fetchSystemStatus, intervalMs);
+    return () => clearInterval(timer);
+  }, [currentUser, systemStatus.is_running]);
 
   const downloadWithAuth = async (url, filename) => {
     try {
@@ -640,6 +689,7 @@ export default function App() {
       const res = await authFetch('/api/ingest/trigger', { method: 'POST' });
       const data = await res.json();
       setIngestStatusMsg(data.message || 'ระบบกำลังดึงข่าวและวิเคราะห์ผ่าน LiteLLM...');
+      fetchSystemStatus();
       setTimeout(() => {
         fetchData();
         setIngestStatusMsg('');
@@ -1012,6 +1062,27 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            {/* Live System Status Pill */}
+            {currentUser && (
+              <div
+                title={systemStatus.is_running ? systemStatus.active_task?.message : (systemStatus.last_completed?.message || 'ระบบพร้อมทำงาน')}
+                className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium max-w-[300px] ${
+                  systemStatus.is_running
+                    ? 'bg-blue-50 border-blue-200 text-blue-800'
+                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 ${
+                  systemStatus.is_running ? 'bg-blue-600 animate-ping' : 'bg-emerald-500'
+                }`} />
+                <span className="truncate">
+                  {systemStatus.is_running
+                    ? `${systemStatus.active_task?.message || 'กำลังประมวลผล...'}${systemStatus.active_task?.total > 0 ? ` (${systemStatus.active_task.current}/${systemStatus.active_task.total})` : ''}`
+                    : 'ระบบพร้อมทำงาน'}
+                </span>
+              </div>
+            )}
+
             {isAdmin && (
               <button
                 onClick={triggerIngest}
@@ -2840,10 +2911,17 @@ export default function App() {
                 { id: 'ingestion', label: 'การดึงข้อมูลและงบ AI' },
                 { id: 'alerts', label: 'การแจ้งเตือนและช่องทาง' },
                 { id: 'system', label: 'PDPA ผู้ใช้ และระบบ' },
+                { id: 'audit', label: 'Audit Log' },
               ].map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => { setActiveSettingsTab(t.id); setSettingsMsg(''); setTestAlertMsg(''); setTestLlmResult(null); }}
+                  onClick={() => {
+                    setActiveSettingsTab(t.id);
+                    setSettingsMsg('');
+                    setTestAlertMsg('');
+                    setTestLlmResult(null);
+                    if (t.id === 'audit') fetchAuditLogs();
+                  }}
                   className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
                     activeSettingsTab === t.id
                       ? 'bg-slate-900 text-white'
@@ -3783,6 +3861,118 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* SUBTAB 6: AUDIT LOG */}
+            {activeSettingsTab === 'audit' && (
+              <div className="bg-white rounded-xl p-6 border border-slate-200 space-y-4 text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">บันทึกการตรวจสอบระบบ (Audit Log)</h3>
+                    <p className="text-xs text-slate-500">บันทึกกิจกรรมสำคัญ การแก้ไขสิทธิ์/ตั้งค่า และคำสั่งผู้ดูแลระบบ (จัดเก็บแยก 365 วัน)</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fetchAuditLogs()}
+                      disabled={loadingAudit}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-semibold text-slate-700 transition inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingAudit ? 'animate-spin' : ''}`} />
+                      <span>รีเฟรช</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => downloadWithAuth('/api/admin/audit-logs/export/csv', 'socialeye_audit_logs.csv')}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition inline-flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>ส่งออก CSV (Excel)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filters */}
+                <div className="flex flex-col sm:flex-row gap-2.5">
+                  <select
+                    value={auditTypeFilter}
+                    onChange={(e) => { setAuditTypeFilter(e.target.value); fetchAuditLogs(e.target.value, auditSearch); }}
+                    className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  >
+                    <option value="all">ทุกประเภทกิจกรรม</option>
+                    <option value="auth">การเข้าใช้งาน (Auth)</option>
+                    <option value="evaluation">การติดป้าย / ประเมิน (Evaluation)</option>
+                    <option value="golden_sample">ชุดข้อมูลทองคำ (Golden Sample)</option>
+                    <option value="policy_report">รายงานนโยบาย (Policy Report)</option>
+                    <option value="system_settings">การตั้งค่าระบบ (Settings)</option>
+                    <option value="data_source">แหล่งข้อมูล (Data Source)</option>
+                    <option value="ingestion">การดึงข้อมูล (Ingestion)</option>
+                    <option value="retention">PDPA Retention</option>
+                  </select>
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      type="text"
+                      value={auditSearch}
+                      onChange={(e) => setAuditSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') fetchAuditLogs(auditTypeFilter, auditSearch); }}
+                      placeholder="ค้นหาชื่อผู้ใช้, อีเมล, การกระทำ หรือรายละเอียด..."
+                      className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fetchAuditLogs(auditTypeFilter, auditSearch)}
+                      className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-semibold text-slate-800 transition"
+                    >
+                      ค้นหา
+                    </button>
+                  </div>
+                </div>
+
+                {/* Table */}
+                {auditLogs.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-xs text-slate-500">
+                    {loadingAudit ? 'กำลังโหลดบันทึก Audit Log...' : 'ไม่พบบันทึก Audit Log ในเงื่อนไขที่เลือก'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-600">
+                          <th className="py-2.5 px-3 whitespace-nowrap">เวลา (UTC)</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">ผู้ดำเนินการ</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">การกระทำ</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">ทรัพยากร</th>
+                          <th className="py-2.5 px-3">รายละเอียด</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {auditLogs.map((log) => (
+                          <tr key={log.id} className="hover:bg-slate-50/70">
+                            <td className="py-2.5 px-3 text-[11px] text-slate-500 whitespace-nowrap font-mono">
+                              {log.created_at ? log.created_at.replace('T', ' ').slice(0, 19) : '-'}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <div className="font-semibold text-slate-900">{log.actor_name || 'System'}</div>
+                              <div className="text-[10px] text-slate-400">{log.actor_email || log.actor_role}</div>
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-800">
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap text-[11px] text-slate-600">
+                              {log.resource_type}{log.resource_id ? ` #${log.resource_id}` : ''}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-700 max-w-md">
+                              {log.summary || '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>
