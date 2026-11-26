@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Content, Evaluation
 from app.analyzer.scoring import evaluate_content_with_llm
 from app.analyzer.aggregator import calculate_daily_indices
+from app.ingest.foreign_filter import is_foreign_only_news
 from app.rag.graph import graph_manager
 from app.ingest.rss import json_rationales
 

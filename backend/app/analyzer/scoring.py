@@ -8,8 +8,10 @@ from app.analyzer.provinces import extract_province
 from app.analyzer.few_shot import get_dynamic_few_shot_prompt
 
 SCORING_JSON_SCHEMA = """# Output JSON Schema
+ประเมินเฉพาะข่าว/เหตุการณ์ที่เกิดขึ้นในประเทศไทยหรือเกี่ยวข้องกับสังคมไทยโดยตรง (หากเป็นข่าวต่างประเทศล้วนที่ไม่เกี่ยวกับไทย ให้กำหนด "is_thai_domestic": false และใส่คะแนนเป็น 0 ทั้งหมด)
 ตอบกลับเป็น JSON ที่ถูกต้องตาม Schema ด้านล่างเท่านั้น ห้ามมีข้อความอธิบายอื่นนอกเหนือจาก JSON:
 {
+  "is_thai_domestic": true,
   "news_summary": "สรุปใจความสำคัญของข่าวสั้นๆ 1-2 ประโยค",
   "province": "ชื่อจังหวัดที่เกิดเหตุ (ถ้าไม่ระบุให้ตอบ 'ระดับประเทศ')",
   "flags": ["satire", "unverified", "opinion"],
@@ -40,6 +42,14 @@ DIMENSIONS_KEYS = ("sufficiency", "discipline", "integrity", "public_mind", "gra
 
 def _normalize_entity_scoring(parsed: Dict[str, Any], title: str, text: str) -> Dict[str, Any]:
     """Ensures backward-compatible scalar summary fields alongside Entity-Level outputs."""
+    if parsed.get("is_thai_domestic") is False:
+        for dim in DIMENSIONS_KEYS:
+            parsed[dim] = {"relevant": False, "score": None, "rationale": "ข่าวต่างประเทศ"}
+        parsed["entity_evaluations"] = []
+        parsed["flags"] = parsed.get("flags") if isinstance(parsed.get("flags"), list) else []
+        parsed["province"] = "ระดับประเทศ"
+        return parsed
+
     entities = parsed.get("entity_evaluations") or []
     overall = parsed.get("overall_virtues") or {}
     first_evidence = None

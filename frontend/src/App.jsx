@@ -140,6 +140,7 @@ export default function App() {
   const [testLlmResult, setTestLlmResult] = useState(null);
   const [activePromptAgent, setActivePromptAgent] = useState('prompt_scoring');
   const [activeRubricDim, setActiveRubricDim] = useState('sufficiency');
+  const [reevaluating, setReevaluating] = useState(false);
   const [newSourceName, setNewSourceName] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceKeywords, setNewSourceKeywords] = useState('');
@@ -238,6 +239,20 @@ export default function App() {
       }
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleReevaluateRecent = async () => {
+    try {
+      setReevaluating(true);
+      setSettingsMsg('');
+      const res = await authFetch('/api/admin/reevaluate?limit=30', { method: 'POST' });
+      const data = await res.json();
+      setSettingsMsg(data.message || 'เริ่มประเมินข่าวล่าสุดซ้ำในพื้นหลังแล้ว');
+    } catch {
+      setSettingsMsg('เกิดข้อผิดพลาดในการสั่งประเมินข่าวซ้ำ');
+    } finally {
+      setReevaluating(false);
     }
   };
 
@@ -3428,6 +3443,15 @@ export default function App() {
                     className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold transition"
                   >
                     คืนค่าเริ่มต้น (Reset Rubrics)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReevaluateRecent}
+                    disabled={reevaluating}
+                    className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-semibold transition flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${reevaluating ? 'animate-spin' : ''}`} />
+                    <span>{reevaluating ? 'กำลังสั่งประเมิน...' : 'ประเมินข่าวล่าสุดซ้ำด้วย Rubric นี้'}</span>
                   </button>
                   {sysMeta.moral_rubric?.updated_by && (
                     <span className="text-[11px] text-slate-400">

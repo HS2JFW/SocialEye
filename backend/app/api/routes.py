@@ -8,8 +8,11 @@ from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db, AsyncSessionLocal
 from app.db.models import Content, Evaluation, DailyIndex, Alert, GoldenSample, PolicyReport, DataSource
-from app.analyzer.aggregator import DIMENSIONS
+from app.analyzer.aggregator import DIMENSIONS, extract_eval_dimension_scores, score_to_5_scale
+from app.analyzer.alerts import check_for_alerts
 from app.ingest.rss import run_ingestion_pipeline
+from app.ingest.foreign_filter import is_foreign_only_news
+from app.analyzer.scoring import evaluate_content_with_llm
 from app.ingest.scheduler import reschedule_ingest_job
 from app.settings_service import (
     get_all_settings,
@@ -160,39 +163,32 @@ async def get_provinces_ranking(
     session: AsyncSession = Depends(get_db),
     _: UserContext = Depends(require_viewer),
 ):
-    """Returns moral scores aggregated per province."""
+    """Returns moral scores aggregated per province using Entity-Level Aggregation."""
     stmt = (
-        select(
-            Evaluation.province,
-            func.count(Evaluation.id).label("total_items"),
-            func.avg(Evaluation.sufficiency_score).label("avg_sufficiency"),
-            func.avg(Evaluation.discipline_score).label("avg_discipline"),
-            func.avg(Evaluation.integrity_score).label("avg_integrity"),
-            func.avg(Evaluation.public_mind_score).label("avg_public_mind"),
-            func.avg(Evaluation.gratitude_score).label("avg_gratitude")
-        )
+        select(Evaluation)
         .where(Evaluation.province != "ระดับประเทศ")
-        .group_by(Evaluation.province)
-        .order_by(desc("total_items"))
     )
-    result = await session.execute(stmt)
-    provinces = []
-    
-    for row in result.all():
-        prov, total, s_suf, s_dis, s_int, s_pub, s_gra = row
-        def to5(v):
-            return round(((v + 2.0) / 4.0) * 5.0, 2) if v is not None else 2.50
+    eval_rows = (await session.execute(stmt)).scalars().all()
 
+    prov_buckets = {}
+    for ev in eval_rows:
+        prov = ev.province
+        if prov not in prov_buckets:
+            prov_buckets[prov] = {"total_items": 0, "dims": {k: [] for k, _ in DIMENSIONS}}
+        prov_buckets[prov]["total_items"] += 1
+        for dim_key, _ in DIMENSIONS:
+            prov_buckets[prov]["dims"][dim_key].extend(extract_eval_dimension_scores(ev, dim_key))
+
+    provinces = []
+    for prov, bucket in sorted(prov_buckets.items(), key=lambda x: x[1]["total_items"], reverse=True):
+        total = bucket["total_items"]
         provinces.append({
             "province": prov,
             "total_items": total,
             "status": "ข้อมูลเพียงพอ" if total >= 5 else "ข้อมูลเบื้องต้น",
             "scores": {
-                "sufficiency": to5(s_suf),
-                "discipline": to5(s_dis),
-                "integrity": to5(s_int),
-                "public_mind": to5(s_pub),
-                "gratitude": to5(s_gra)
+                dim_key: (score_to_5_scale(sum(bucket["dims"][dim_key]) / len(bucket["dims"][dim_key])) if bucket["dims"][dim_key] else 2.50)
+                for dim_key, _ in DIMENSIONS
             }
         })
 
@@ -835,6 +831,66 @@ async def reset_admin_ai_defaults(
     target = payload.get("target", "all")
     result = await reset_ai_defaults(session, target=target, updated_by=user.display_identity)
     return {"status": "success", "message": "คืนค่าเริ่มต้นเรียบร้อย", **result}
+
+async def _bg_reevaluate_recent(limit: int = 30):
+    from app.analyzer.aggregator import calculate_daily_indices
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(Content, Evaluation)
+                .join(Evaluation, Content.id == Evaluation.content_id)
+                .where(Evaluation.is_reviewed == False)
+                .order_by(desc(Content.published_at))
+                .limit(limit)
+            )
+            rows = (await session.execute(stmt)).all()
+            for content, ev in rows:
+                if is_foreign_only_news(content.url, content.title, content.text):
+                    await session.delete(content)
+                    continue
+                eval_res = await evaluate_content_with_llm(content.title, content.text, session=session)
+                if eval_res.get("is_thai_domestic") is False:
+                    await session.delete(content)
+                    continue
+                orig_scores = {
+                    "sufficiency": eval_res.get("sufficiency", {}).get("score"),
+                    "discipline": eval_res.get("discipline", {}).get("score"),
+                    "integrity": eval_res.get("integrity", {}).get("score"),
+                    "public_mind": eval_res.get("public_mind", {}).get("score"),
+                    "gratitude": eval_res.get("gratitude", {}).get("score"),
+                }
+                ev.sufficiency_score = orig_scores["sufficiency"]
+                ev.discipline_score = orig_scores["discipline"]
+                ev.integrity_score = orig_scores["integrity"]
+                ev.public_mind_score = orig_scores["public_mind"]
+                ev.gratitude_score = orig_scores["gratitude"]
+                ev.evidence_quote = eval_res.get("evidence_quote")
+                ev.province = eval_res.get("province", ev.province)
+                ev.flags = eval_res.get("flags", [])
+                ev.original_ai_scores = orig_scores
+                ev.news_summary = eval_res.get("news_summary")
+                ev.overall_virtues = eval_res.get("overall_virtues")
+                ev.entity_evaluations = eval_res.get("entity_evaluations")
+                ev.evaluated_at = datetime.utcnow()
+            await session.commit()
+            await calculate_daily_indices(session)
+            await check_for_alerts(session)
+    except Exception as e:
+        print(f"Background re-evaluate error: {e}")
+
+@router.post("/admin/reevaluate")
+async def trigger_reevaluate_recent(
+    background_tasks: BackgroundTasks,
+    limit: int = 30,
+    _: UserContext = Depends(require_admin),
+):
+    """Re-evaluates recent unreviewed news items using the latest Rubrics v2 and foreign-news filter."""
+    safe_limit = max(1, min(100, int(limit)))
+    background_tasks.add_task(_bg_reevaluate_recent, safe_limit)
+    return {
+        "status": "success",
+        "message": f"เริ่มประเมินข่าวล่าสุด {safe_limit} รายการซ้ำด้วย Rubrics ใหม่และคัดกรองข่าวต่างประเทศในพื้นหลังแล้ว",
+    }
 
 @router.get("/admin/sources")
 async def list_data_sources(

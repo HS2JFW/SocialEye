@@ -7,6 +7,7 @@ from app.db.models import Content, Evaluation, DataSource
 from app.analyzer.scoring import evaluate_content_with_llm
 from app.analyzer.aggregator import calculate_daily_indices
 from app.analyzer.alerts import check_for_alerts
+from app.ingest.foreign_filter import is_foreign_only_news
 from app.rag.graph import graph_manager
 
 RSS_FEEDS = [
@@ -99,8 +100,17 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                 if existing:
                     continue
 
+                # Filter out foreign-only news before LLM evaluation
+                if is_foreign_only_news(link, title, summary):
+                    continue
+
                 # Clean summary / text
                 text_content = f"{title}. {summary}"
+
+                # Evaluate with LLM (with dynamic few-shot)
+                eval_res = await evaluate_content_with_llm(title, text_content, session=session)
+                if eval_res.get("is_thai_domestic") is False:
+                    continue
 
                 pub_time = datetime.utcnow()
                 if getattr(item, "published_parsed", None):
@@ -120,9 +130,6 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                 session.add(content_obj)
                 await session.flush()
                 new_contents_count += 1
-
-                # Evaluate with LLM (with dynamic few-shot)
-                eval_res = await evaluate_content_with_llm(title, text_content, session=session)
                 
                 orig_scores = {
                     "sufficiency": eval_res.get("sufficiency", {}).get("score"),

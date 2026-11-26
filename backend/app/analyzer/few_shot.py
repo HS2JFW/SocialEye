@@ -76,14 +76,17 @@ async def get_dynamic_few_shot_prompt(session: AsyncSession, query_text: str, to
         "\n--- ตัวอย่างการให้คะแนนมาตรฐานโดยผู้เชี่ยวชาญ (Few-Shot Learning Examples) ---"
     ]
     for idx, s in enumerate(selected, 1):
+        def _fmt(v):
+            return int(round(v)) if v is not None else 0
+
         lines.append(f"[ตัวอย่างที่ {idx}] หัวข้อ: {s.title}")
         lines.append(f"เนื้อหา: {s.text[:200]}...")
-        lines.append("การประเมิน:")
-        lines.append(f"- พอเพียง (sufficiency): {s.sufficiency_score}")
-        lines.append(f"- วินัย (discipline): {s.discipline_score}")
-        lines.append(f"- สุจริต (integrity): {s.integrity_score}")
-        lines.append(f"- จิตอาสา (public_mind): {s.public_mind_score}")
-        lines.append(f"- กตัญญู (gratitude): {s.gratitude_score}")
+        lines.append("คะแนนอ้างอิงตาม Rubrics (0 = ไม่เกี่ยวข้อง):")
+        lines.append(f"- พอเพียง (sufficiency): {_fmt(s.sufficiency_score)}")
+        lines.append(f"- วินัย (discipline): {_fmt(s.discipline_score)}")
+        lines.append(f"- สุจริต (integrity): {_fmt(s.integrity_score)}")
+        lines.append(f"- จิตอาสา (public_mind): {_fmt(s.public_mind_score)}")
+        lines.append(f"- กตัญญู (gratitude): {_fmt(s.gratitude_score)}")
         if s.evidence_quote:
             lines.append(f"- ข้อความอ้างอิง: \"{s.evidence_quote}\"")
         if s.rationale:

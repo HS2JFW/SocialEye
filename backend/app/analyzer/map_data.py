@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Evaluation, Content
+from app.analyzer.aggregator import DIMENSIONS, extract_eval_dimension_scores, score_to_5_scale
 
 REGIONS = {
     "ภาคเหนือ": [
@@ -42,37 +43,35 @@ def get_region_for_province(province_name: str) -> str:
 
 async def get_thailand_map_overview(session: AsyncSession) -> Dict[str, Any]:
     """
-    Computes comprehensive moral health statistics across 6 regions and 77 provinces.
+    Computes comprehensive moral health statistics across 6 regions and 77 provinces
+    using Entity-Level Aggregation (respecting human-reviewed overrides).
     """
     stmt = (
-        select(
-            Evaluation.province,
-            func.count(Evaluation.id).label("total_items"),
-            func.avg(Evaluation.sufficiency_score).label("avg_sufficiency"),
-            func.avg(Evaluation.discipline_score).label("avg_discipline"),
-            func.avg(Evaluation.integrity_score).label("avg_integrity"),
-            func.avg(Evaluation.public_mind_score).label("avg_public_mind"),
-            func.avg(Evaluation.gratitude_score).label("avg_gratitude")
-        )
+        select(Evaluation)
         .where(Evaluation.province != "ระดับประเทศ")
-        .group_by(Evaluation.province)
     )
-    results = (await session.execute(stmt)).all()
-    
+    eval_rows = (await session.execute(stmt)).scalars().all()
+
+    prov_buckets: Dict[str, Dict[str, Any]] = {}
+    for ev in eval_rows:
+        prov = ev.province
+        if prov not in prov_buckets:
+            prov_buckets[prov] = {
+                "total_items": 0,
+                "dims": {k: [] for k, _ in DIMENSIONS},
+            }
+        prov_buckets[prov]["total_items"] += 1
+        for dim_key, _ in DIMENSIONS:
+            prov_buckets[prov]["dims"][dim_key].extend(extract_eval_dimension_scores(ev, dim_key))
+
     db_provinces = {}
-    for row in results:
-        prov, total, s_suf, s_dis, s_int, s_pub, s_gra = row
-        def to5(v):
-            return round(((v + 2.0) / 4.0) * 5.0, 2) if v is not None else 2.50
-        
-        scores = {
-            "sufficiency": to5(s_suf),
-            "discipline": to5(s_dis),
-            "integrity": to5(s_int),
-            "public_mind": to5(s_pub),
-            "gratitude": to5(s_gra)
-        }
+    for prov, bucket in prov_buckets.items():
+        scores = {}
+        for dim_key, _ in DIMENSIONS:
+            vals = bucket["dims"][dim_key]
+            scores[dim_key] = score_to_5_scale(sum(vals) / len(vals)) if vals else 2.50
         overall = round(sum(scores.values()) / 5.0, 2)
+        total = bucket["total_items"]
         db_provinces[prov] = {
             "total_items": total,
             "overall_score": overall,
