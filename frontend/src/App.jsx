@@ -10,6 +10,7 @@ import {
   LogIn, LogOut, Lock, PanelLeftClose, PanelLeftOpen, Settings
 } from 'lucide-react';
 import ThailandSvgMap from './components/ThailandSvgMap';
+import MoralNetworkGraph from './components/MoralNetworkGraph';
 import {
   authFetch,
   getAuthConfig,
@@ -83,6 +84,12 @@ export default function App() {
   const [selectedProvinceModal, setSelectedProvinceModal] = useState(null);
   const [clusters, setClusters] = useState([]);
   const [graphOverview, setGraphOverview] = useState(null);
+  const [activeClusterSubtab, setActiveClusterSubtab] = useState('clusters');
+  const [networkData, setNetworkData] = useState({ nodes: [], edges: [], stats: {} });
+  const [loadingNetwork, setLoadingNetwork] = useState(false);
+  const [netDimFilter, setNetDimFilter] = useState('all');
+  const [netPolFilter, setNetPolFilter] = useState('all');
+  const [netLimit, setNetLimit] = useState(35);
 
   // Phase 4: Reports, Connectors & Retention States
   const [reports, setReports] = useState([]);
@@ -456,6 +463,27 @@ export default function App() {
     };
     initAuth();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser || activeMainTab !== 'clusters' || activeClusterSubtab !== 'network') return;
+    const loadNet = async () => {
+      try {
+        setLoadingNetwork(true);
+        const params = new URLSearchParams({
+          dimension: netDimFilter,
+          polarity: netPolFilter,
+          limit: String(netLimit),
+        });
+        const res = await authFetch(`/api/graph/network?${params.toString()}`);
+        if (res.ok) {
+          setNetworkData(await res.json());
+        }
+      } finally {
+        setLoadingNetwork(false);
+      }
+    };
+    loadNet();
+  }, [currentUser, activeMainTab, activeClusterSubtab, netDimFilter, netPolFilter, netLimit]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -2105,27 +2133,67 @@ export default function App() {
         ========================================================================= */}
         {activeMainTab === 'clusters' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="bg-white rounded-xl p-5 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-                  <Flame className="w-5 h-5 text-amber-500" />
-                  การจับกลุ่มประเด็นร้อนทางคุณธรรม (Emerging Moral Issue Clusters)
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-slate-800" />
+                  ประเด็นร้อนและแผนผังความสัมพันธ์เอนทิตี
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  ประมวลผลด้วย Semantic Clustering และ Entity Association วิเคราะห์ทิศทางและโมเมนตัมของประเด็นในสังคม
+                  วิเคราะห์กลุ่มประเด็นสำคัญและความเชื่อมโยงระหว่างตัวละคร องค์กร มิติคุณธรรม 5 ด้าน และจังหวัด
                 </p>
               </div>
 
-              {graphOverview && (
-                <div className="flex items-center gap-3 text-xs bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
-                  <span className="text-slate-500">Knowledge Graph:</span>
-                  <span className="font-bold text-slate-800">{graphOverview.total_entities || 12} เอนทิตี</span>
-                  <span>•</span>
-                  <span className="font-bold text-slate-800">{graphOverview.total_contents || 30} ข่าว</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setActiveClusterSubtab('clusters')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                      activeClusterSubtab === 'clusters'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    กลุ่มประเด็นร้อน
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveClusterSubtab('network')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                      activeClusterSubtab === 'network'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    กราฟความสัมพันธ์เอนทิตี
+                  </button>
                 </div>
-              )}
+
+                {graphOverview && (
+                  <div className="flex items-center gap-2 text-xs bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                    <span className="text-slate-500">Graph:</span>
+                    <span className="font-bold text-slate-800">{graphOverview.total_entities || 0} เอนทิตี</span>
+                    <span>•</span>
+                    <span className="font-bold text-slate-800">{graphOverview.total_contents || 0} ข่าว</span>
+                  </div>
+                )}
+              </div>
             </div>
 
+            {activeClusterSubtab === 'network' ? (
+              <MoralNetworkGraph
+                networkData={networkData}
+                loading={loadingNetwork}
+                dimensionFilter={netDimFilter}
+                setDimensionFilter={setNetDimFilter}
+                polarityFilter={netPolFilter}
+                setPolarityFilter={setNetPolFilter}
+                limitEntities={netLimit}
+                setLimitEntities={setNetLimit}
+                onAskAiEntity={(label) => handlePromptClick(`วิเคราะห์บทบาทและข่าวที่เกี่ยวข้องกับ "${label}" ในมิติคุณธรรม 5 ด้าน`)}
+              />
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {clusters.map((cluster) => (
                 <div 
@@ -2190,6 +2258,7 @@ export default function App() {
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
 

@@ -172,7 +172,8 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                             province=eval_obj.province,
                             scores=orig_scores,
                             evidence_quote=eval_obj.evidence_quote,
-                            rationale=eval_obj.rationale
+                            rationale=eval_obj.rationale,
+                            entity_evaluations=eval_res.get("entity_evaluations"),
                         )
                     except Exception as ge:
                         print(f"[Ingest] Graph sync notice: {ge}")

@@ -121,7 +121,8 @@ async def import_wisesight_data(
                 province=eval_obj.province,
                 scores=orig_scores,
                 evidence_quote=eval_obj.evidence_quote,
-                rationale=eval_obj.rationale
+                rationale=eval_obj.rationale,
+                entity_evaluations=eval_res.get("entity_evaluations"),
             )
         except Exception:
             pass

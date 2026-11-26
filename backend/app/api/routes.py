@@ -572,6 +572,22 @@ async def get_graph_overview_endpoint(_: UserContext = Depends(require_viewer)):
     overview = await graph_manager.get_graph_overview()
     return overview
 
+@router.get("/graph/network")
+async def get_graph_network_endpoint(
+    dimension: str = "all",
+    polarity: str = "all",
+    limit: int = 30,
+    session: AsyncSession = Depends(get_db),
+    _: UserContext = Depends(require_viewer),
+):
+    """Returns Tripartite Moral Network (Entity <-> Dimension <-> Province) for interactive visualization."""
+    return await graph_manager.get_moral_network(
+        db_session=session,
+        dimension=dimension,
+        polarity=polarity,
+        limit_entities=limit,
+    )
+
 async def _bg_run_ingest():
     try:
         async with AsyncSessionLocal() as session:
