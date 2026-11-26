@@ -238,6 +238,9 @@ async def get_content_feed(
                     "gratitude": evaluation.gratitude_score
                 },
                 "original_ai_scores": evaluation.original_ai_scores,
+                "news_summary": evaluation.news_summary,
+                "overall_virtues": evaluation.overall_virtues,
+                "entity_evaluations": evaluation.entity_evaluations or [],
                 "rationale": evaluation.rationale,
                 "is_reviewed": evaluation.is_reviewed,
                 "reviewed_by": evaluation.reviewed_by,
@@ -374,6 +377,9 @@ async def get_review_queue(
                 "gratitude": evaluation.gratitude_score
             },
             "original_ai_scores": evaluation.original_ai_scores,
+            "news_summary": evaluation.news_summary,
+            "overall_virtues": evaluation.overall_virtues,
+            "entity_evaluations": evaluation.entity_evaluations or [],
             "rationale": evaluation.rationale,
             "is_reviewed": evaluation.is_reviewed,
             "reviewed_by": evaluation.reviewed_by,

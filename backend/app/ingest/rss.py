@@ -144,6 +144,9 @@ async def run_ingestion_pipeline(session: AsyncSession, max_items_per_feed: int 
                     flags=eval_res.get("flags", []),
                     rationale=json_rationales(eval_res),
                     original_ai_scores=orig_scores,
+                    news_summary=eval_res.get("news_summary"),
+                    overall_virtues=eval_res.get("overall_virtues"),
+                    entity_evaluations=eval_res.get("entity_evaluations"),
                     evaluated_at=datetime.utcnow()
                 )
                 session.add(eval_obj)

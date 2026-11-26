@@ -41,5 +41,13 @@ The editable behavioral instructions and domain guidelines for an AI agent (Scor
 _Avoid_: Prompt Template, Instruction String
 
 **Moral Rubric**:
-The structured evaluation criteria comprising the five virtue definitions, the five-level polarity scale (-2 to +2), and ambiguity rules used to score content consistently.
+The structured evaluation criteria comprising per-virtue definitions, five-level polarity criteria (-2 to +2), boundary rules, and core analysis rules used to score content consistently.
 _Avoid_: Scoring Guide, Evaluation Matrix
+
+**Boundary Rule**:
+A disambiguation rule attached to a virtue that specifies how to separate overlapping concepts (such as negligence vs. bribery, or official duty vs. voluntary public-mind action).
+_Avoid_: Edge Case Rule, Special Rule
+
+**Entity Evaluation**:
+The per-actor moral assessment extracted from a news item, recording an individual, group, or organization's role, virtue scores, verbatim evidence, and reasoning without canceling out other actors.
+_Avoid_: Actor Score, Character Rating

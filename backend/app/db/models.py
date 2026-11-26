@@ -46,6 +46,11 @@ class Evaluation(Base):
     
     # Original AI Predictions for benchmark and accuracy comparison
     original_ai_scores = Column(JSON, nullable=True)
+
+    # Entity-Level Scoring & Overall Virtues (v2 Rubric)
+    news_summary = Column(Text, nullable=True)
+    overall_virtues = Column(JSON, nullable=True)
+    entity_evaluations = Column(JSON, nullable=True)
     
     # Human-in-the-loop review
     is_reviewed = Column(Boolean, default=False, index=True)

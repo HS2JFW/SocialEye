@@ -139,6 +139,7 @@ export default function App() {
   const [testingLlm, setTestingLlm] = useState(false);
   const [testLlmResult, setTestLlmResult] = useState(null);
   const [activePromptAgent, setActivePromptAgent] = useState('prompt_scoring');
+  const [activeRubricDim, setActiveRubricDim] = useState('sufficiency');
   const [newSourceName, setNewSourceName] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceKeywords, setNewSourceKeywords] = useState('');
@@ -1515,9 +1516,53 @@ export default function App() {
                             </button>
                           </div>
 
+                          {ev.news_summary && (
+                            <p className="mt-2 text-xs text-slate-600 leading-relaxed">{ev.news_summary}</p>
+                          )}
+
                           {ev.evidence_quote && (
                             <div className="mt-2.5 p-2.5 rounded-xl bg-slate-50 text-xs text-slate-700 border-l-2 border-blue-500 font-medium">
                               "{ev.evidence_quote}"
+                            </div>
+                          )}
+
+                          {ev.entity_evaluations && ev.entity_evaluations.length > 0 && (
+                            <div className="mt-2.5 space-y-1.5">
+                              {ev.entity_evaluations.map((ent, eIdx) => {
+                                const activeDims = DIMENSIONS.filter((d) => {
+                                  const sc = ent.scores?.[d.key]?.score;
+                                  return sc !== null && sc !== undefined && sc !== 0;
+                                });
+                                if (activeDims.length === 0) return null;
+                                return (
+                                  <div key={eIdx} className="p-2 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px] space-y-1">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span className="font-bold text-slate-900">{ent.entity_name}</span>
+                                      {ent.role_in_news && (
+                                        <span className="px-1.5 py-0.2 rounded bg-slate-200/70 text-slate-600 text-[10px]">
+                                          {ent.role_in_news}
+                                        </span>
+                                      )}
+                                      {activeDims.map((d) => {
+                                        const sc = ent.scores[d.key].score;
+                                        return (
+                                          <span
+                                            key={d.key}
+                                            className={`px-1.5 py-0.2 rounded font-bold border ${
+                                              sc > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                                            }`}
+                                          >
+                                            {d.name}: {sc > 0 ? `+${sc}` : sc}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                    {activeDims[0] && ent.scores?.[activeDims[0].key]?.reasoning && (
+                                      <p className="text-slate-500">{ent.scores[activeDims[0].key].reasoning}</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
 
@@ -2440,10 +2485,22 @@ export default function App() {
                               )}
                             </div>
                             <h4 className="text-sm font-bold text-slate-900 leading-snug">{item.title}</h4>
+                            {item.news_summary && (
+                              <p className="text-xs text-slate-600">{item.news_summary}</p>
+                            )}
                             {item.evidence_quote && (
                               <p className="text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border-l-2 border-indigo-500">
                                 "{item.evidence_quote}"
                               </p>
+                            )}
+                            {item.entity_evaluations && item.entity_evaluations.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {item.entity_evaluations.map((ent, eIdx) => (
+                                  <span key={eIdx} className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700">
+                                    {ent.entity_name} ({ent.role_in_news || 'ตัวละคร'})
+                                  </span>
+                                ))}
+                              </div>
                             )}
                           </div>
 
@@ -3165,46 +3222,19 @@ export default function App() {
                 </div>
               </form>
 
-              {/* CARD 3: MORAL RUBRICS */}
+              {/* CARD 3: MORAL RUBRICS (v2 PER-DIMENSION + BOUNDARY + CORE RULES) */}
               <form onSubmit={handleSaveSettings} className="bg-white rounded-xl p-6 border border-slate-200 space-y-6 text-left mt-6">
                 <div className="border-b border-slate-100 pb-3 space-y-1">
-                  <h3 className="text-sm font-bold text-slate-900">เกณฑ์การให้คะแนนคุณธรรม 5 ด้าน (Moral Rubrics)</h3>
+                  <h3 className="text-sm font-bold text-slate-900">เกณฑ์การให้คะแนนและกฎแยกแยะคุณธรรม 5 ด้าน (Moral Rubrics & Boundary Rules)</h3>
                   <p className="text-xs text-slate-500">
-                    ปรับนิยามคุณธรรม 5 ด้าน เกณฑ์สเกลคะแนน (-2 ถึง +2) และกฎกรณีพิเศษ ระบบจะนำไปใช้ประเมินข่าวทันที
+                    ปรับสเกลคะแนน นิยาม เกณฑ์รายระดับ (+2 ถึง -2) กฎแยกแยะรายมิติ และกฎหลักการวิเคราะห์ ระบบจะนำไปใช้ประเมินข่าวทันที
                   </p>
                 </div>
 
-                {/* 5 Dimension Definitions */}
+                {/* 1. Scoring Scale (+2 to -2) */}
                 <div className="space-y-3">
-                  <h4 className="text-xs font-bold text-slate-800">1. นิยามคุณธรรม 5 ด้าน</h4>
-                  <div className="grid grid-cols-1 gap-3">
-                    {DIMENSIONS.map((dim) => (
-                      <div key={dim.key} className="space-y-1">
-                        <label className="block text-xs font-semibold text-slate-700">{dim.name} ({dim.key})</label>
-                        <input
-                          type="text"
-                          value={sysSettings.moral_rubric?.dimensions?.[dim.key] ?? ''}
-                          onChange={(e) => setSysSettings({
-                            ...sysSettings,
-                            moral_rubric: {
-                              ...(sysSettings.moral_rubric || {}),
-                              dimensions: {
-                                ...(sysSettings.moral_rubric?.dimensions || {}),
-                                [dim.key]: e.target.value
-                              }
-                            }
-                          })}
-                          className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Scale -2 to +2 */}
-                <div className="space-y-3 pt-2 border-t border-slate-100">
-                  <h4 className="text-xs font-bold text-slate-800">2. คำอธิบายเกณฑ์คะแนนรายระดับ (-2 ถึง +2)</h4>
-                  <div className="grid grid-cols-1 gap-2.5">
+                  <h4 className="text-xs font-bold text-slate-800">1. สเกลคะแนนกลาง (Scoring Scale: -2 ถึง +2)</h4>
+                  <div className="grid grid-cols-1 gap-2">
                     {['+2', '+1', '0', '-1', '-2'].map((lvl) => (
                       <div key={lvl} className="flex flex-col sm:flex-row sm:items-center gap-2">
                         <span className="w-12 px-2 py-1 rounded bg-slate-100 text-slate-800 text-xs font-bold text-center shrink-0">
@@ -3230,19 +3260,108 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Ambiguity Rules */}
-                <div className="space-y-3 pt-2 border-t border-slate-100">
+                {/* 2. Per-Dimension Rubrics & Boundary Rules */}
+                <div className="space-y-4 pt-3 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-800">2. เกณฑ์เฉพาะรายด้านและกฎแยกแยะ (Evaluation Rubrics & Boundary Rules)</h4>
+                  <div className="flex flex-wrap justify-start gap-1.5">
+                    {DIMENSIONS.map((dim) => (
+                      <button
+                        key={dim.key}
+                        type="button"
+                        onClick={() => setActiveRubricDim(dim.key)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                          activeRubricDim === dim.key
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {dim.name} ({dim.key})
+                      </button>
+                    ))}
+                  </div>
+
+                  {(() => {
+                    const dimObj = typeof sysSettings.moral_rubric?.dimensions?.[activeRubricDim] === 'object'
+                      ? (sysSettings.moral_rubric?.dimensions?.[activeRubricDim] || {})
+                      : { definition: String(sysSettings.moral_rubric?.dimensions?.[activeRubricDim] || ''), criteria: {}, boundary_rule: '' };
+
+                    const updateDimField = (field, val) => {
+                      setSysSettings({
+                        ...sysSettings,
+                        moral_rubric: {
+                          ...(sysSettings.moral_rubric || {}),
+                          dimensions: {
+                            ...(sysSettings.moral_rubric?.dimensions || {}),
+                            [activeRubricDim]: {
+                              ...dimObj,
+                              [field]: val
+                            }
+                          }
+                        }
+                      });
+                    };
+
+                    const updateCriteria = (lvl, val) => {
+                      updateDimField('criteria', { ...(dimObj.criteria || {}), [lvl]: val });
+                    };
+
+                    return (
+                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                        <div className="space-y-1">
+                          <label className="block text-xs font-semibold text-slate-700">นิยาม (Definition)</label>
+                          <textarea
+                            rows="2"
+                            value={dimObj.definition ?? ''}
+                            onChange={(e) => updateDimField('definition', e.target.value)}
+                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {['+2', '+1', '-1', '-2'].map((lvl) => (
+                            <div key={lvl} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                              <span className={`w-12 px-2 py-1 rounded text-xs font-bold text-center shrink-0 border ${
+                                lvl.startsWith('+') ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}>
+                                {lvl}
+                              </span>
+                              <input
+                                type="text"
+                                value={dimObj.criteria?.[lvl] ?? ''}
+                                onChange={(e) => updateCriteria(lvl, e.target.value)}
+                                className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-xs font-semibold text-slate-700">กฎแยกแยะ (Boundary Rule)</label>
+                          <textarea
+                            rows="2"
+                            value={dimObj.boundary_rule ?? ''}
+                            onChange={(e) => updateDimField('boundary_rule', e.target.value)}
+                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 3. Core Analysis Rules */}
+                <div className="space-y-3 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-start gap-3">
-                    <h4 className="text-xs font-bold text-slate-800">3. กฎกรณีพิเศษ / เคสกำกวม (Ambiguity Rules)</h4>
+                    <h4 className="text-xs font-bold text-slate-800">3. กฎหลักในการวิเคราะห์ (Core Analysis Rules)</h4>
                     <button
                       type="button"
                       onClick={() => {
-                        const curr = sysSettings.moral_rubric?.ambiguity_rules || [];
+                        const curr = sysSettings.moral_rubric?.core_rules || [];
                         setSysSettings({
                           ...sysSettings,
                           moral_rubric: {
                             ...(sysSettings.moral_rubric || {}),
-                            ambiguity_rules: [...curr, '']
+                            core_rules: [...curr, '']
                           }
                         });
                       }}
@@ -3253,34 +3372,34 @@ export default function App() {
                     </button>
                   </div>
                   <div className="space-y-2">
-                    {(sysSettings.moral_rubric?.ambiguity_rules || []).map((rule, idx) => (
+                    {(sysSettings.moral_rubric?.core_rules || []).map((rule, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <input
                           type="text"
                           value={rule}
                           onChange={(e) => {
-                            const updated = [...(sysSettings.moral_rubric?.ambiguity_rules || [])];
+                            const updated = [...(sysSettings.moral_rubric?.core_rules || [])];
                             updated[idx] = e.target.value;
                             setSysSettings({
                               ...sysSettings,
                               moral_rubric: {
                                 ...(sysSettings.moral_rubric || {}),
-                                ambiguity_rules: updated
+                                core_rules: updated
                               }
                             });
                           }}
-                          placeholder="ระบุกฎการให้คะแนนกรณีพิเศษ..."
+                          placeholder="ระบุกฎหลักในการวิเคราะห์..."
                           className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900"
                         />
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = (sysSettings.moral_rubric?.ambiguity_rules || []).filter((_, i) => i !== idx);
+                            const updated = (sysSettings.moral_rubric?.core_rules || []).filter((_, i) => i !== idx);
                             setSysSettings({
                               ...sysSettings,
                               moral_rubric: {
                                 ...(sysSettings.moral_rubric || {}),
-                                ambiguity_rules: updated
+                                core_rules: updated
                               }
                             });
                           }}

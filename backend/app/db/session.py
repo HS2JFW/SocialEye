@@ -28,6 +28,9 @@ async def init_db():
         # Migrate schema dynamically if new columns were added to existing tables
         try:
             await conn.execute(text("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS original_ai_scores JSON;"))
+            await conn.execute(text("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS news_summary TEXT;"))
+            await conn.execute(text("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS overall_virtues JSON;"))
+            await conn.execute(text("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS entity_evaluations JSON;"))
         except Exception as e:
             print(f"[SocialEye] Migration notice: {e}")
 

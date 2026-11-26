@@ -37,14 +37,25 @@ async def calculate_daily_indices(session: AsyncSession, target_date: Optional[s
         weights = []
         
         for content, eval_obj in rows:
-            val = getattr(eval_obj, f"{dim_key}_score")
-            if val is not None:
-                # Weight = reach * confidence * (0.5 if unverified)
-                w = float(content.reach or 1000) * float(eval_obj.confidence or 1.0)
-                if eval_obj.flags and "unverified" in eval_obj.flags:
-                    w *= 0.5
-                scores.append(val)
-                weights.append(w)
+            # Weight = reach * confidence * (0.5 if unverified)
+            w = float(content.reach or 1000) * float(eval_obj.confidence or 1.0)
+            if eval_obj.flags and "unverified" in eval_obj.flags:
+                w *= 0.5
+
+            # Entity-Level Aggregation (v2 Rubric): each non-zero actor contributes without canceling others
+            entities = getattr(eval_obj, "entity_evaluations", None) or []
+            if entities:
+                for ent in entities:
+                    sc_obj = (ent.get("scores") or {}).get(dim_key) or {}
+                    ent_val = sc_obj.get("score")
+                    if isinstance(ent_val, (int, float)) and ent_val != 0:
+                        scores.append(float(ent_val))
+                        weights.append(w)
+            else:
+                val = getattr(eval_obj, f"{dim_key}_score")
+                if val is not None:
+                    scores.append(val)
+                    weights.append(w)
 
         if scores and sum(weights) > 0:
             weighted_mean = sum(s * w for s, w in zip(scores, weights)) / sum(weights)
